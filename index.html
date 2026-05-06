@@ -1357,6 +1357,24 @@
   .unsaved-banner.show{
     transform:translateX(-50%) translateY(0);
   }
+  /* Idle state: no unsaved changes — softer color, less attention-grabbing */
+  .unsaved-banner.idle{
+    border-color:#cfc7ad;
+    background:#fdfaf0;
+    opacity:0.92;
+  }
+  .unsaved-banner.idle .ub-dot{
+    background:#a99d80;
+    box-shadow:none;
+    animation:none;
+  }
+  .unsaved-banner.idle .ub-title{
+    color:#7a6c4e;
+  }
+  .unsaved-banner.idle .btn.primary{
+    opacity:0.6;
+    cursor:not-allowed;
+  }
   .unsaved-banner .ub-info{
     display:flex; align-items:center; gap:12px;
     flex:1;
@@ -1843,8 +1861,8 @@
   <div class="ub-info">
     <div class="ub-dot"></div>
     <div>
-      <div class="ub-title">您有 <span id="unsavedCount">0</span> 筆未儲存的變更</div>
-      <div class="ub-sub">完成所有調整後請按「儲存變更」一次同步至 Sheet</div>
+      <div class="ub-title" id="unsavedTitle">批次儲存模式 (管理員)</div>
+      <div class="ub-sub" id="unsavedSub">所有班別異動需手動按「儲存變更」才會寫入 Sheet</div>
     </div>
   </div>
   <div class="ub-actions">
@@ -2296,10 +2314,7 @@
           <div class="form-row">
             <label>換班班別 <span style="color:#c14a4a;">*</span></label>
             <select id="applySwapTargetShift">
-              <option value="早">早班</option>
-              <option value="午">午班</option>
-              <option value="晚">晚班</option>
-              <option value="出勤">出勤 (12HR)</option>
+              <!-- Populated by openApplyModal based on this branch+position's actual shifts -->
             </select>
           </div>
         </div>
@@ -4047,7 +4062,36 @@ function openApplyModal(ctx){
   $('applyNote').value = '';
   // Reset swap target fields
   if($('applySwapTargetDate')) $('applySwapTargetDate').value = '';
-  if($('applySwapTargetShift')) $('applySwapTargetShift').value = ctx.shift || '早';
+  // Build available shift options based on this branch+position's rules
+  // Only show shifts that have count > 0 (i.e. this position actually has that shift)
+  const tgtSel = $('applySwapTargetShift');
+  if(tgtSel){
+    const branchSettings = (State.settings || {})[ctx.branch];
+    const setting = branchSettings && branchSettings[ctx.position];
+    const rules = (setting && setting.rules) || {};
+    const shiftOpts = [];
+    if((rules.morningCount||0) > 0) shiftOpts.push({value:'早', label:'早班'});
+    if((rules.noonCount||0) > 0) shiftOpts.push({value:'午', label:'午班'});
+    if((rules.eveningCount||0) > 0) shiftOpts.push({value:'晚', label:'晚班'});
+    if((rules.attendanceCount||0) > 0) shiftOpts.push({value:'出勤', label:'出勤 (12HR)'});
+    // Fallback: if no shifts configured, show all 4 (defensive)
+    if(shiftOpts.length === 0){
+      shiftOpts.push(
+        {value:'早', label:'早班'},
+        {value:'午', label:'午班'},
+        {value:'晚', label:'晚班'},
+        {value:'出勤', label:'出勤 (12HR)'}
+      );
+    }
+    tgtSel.innerHTML = shiftOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    // Try to default to the source shift if available, else first option
+    const srcShift = ctx.shift;
+    if(srcShift && shiftOpts.some(o => o.value === srcShift)){
+      tgtSel.value = srcShift;
+    } else {
+      tgtSel.value = shiftOpts[0].value;
+    }
+  }
   if($('applySwapDateHint')) $('applySwapDateHint').textContent = '選擇換班員工後可選日期';
 
   // Default reason: 換班
@@ -4705,16 +4749,23 @@ function updateUnsavedBanner(){
   // Banner only shown for admin (guest uses immediate-save flow)
   if(State.user.role !== 'admin'){
     banner.classList.remove('show');
+    banner.classList.remove('idle');
     return;
   }
   const unsavedCount = (State.swaps||[]).filter(s=>s._unsaved).length;
   const delCount = (State.pendingDeletions||[]).length;
   const total = unsavedCount + delCount;
+  // Always show for admin — but visual state differs
+  banner.classList.add('show');
+  $('unsavedCount').textContent = total;
   if(total > 0){
-    banner.classList.add('show');
-    $('unsavedCount').textContent = total;
+    banner.classList.remove('idle');
+    $('unsavedTitle').innerHTML = `您有 <span id="unsavedCount">${total}</span> 筆未儲存的變更`;
+    $('unsavedSub').textContent = '完成所有調整後請按「儲存變更」一次同步至 Sheet';
   } else {
-    banner.classList.remove('show');
+    banner.classList.add('idle');
+    $('unsavedTitle').innerHTML = `批次儲存模式 (管理員)`;
+    $('unsavedSub').textContent = '所有班別異動需手動按「儲存變更」才會寫入 Sheet';
   }
 }
 
@@ -5842,6 +5893,7 @@ async function doAdminLogin(){
   // Re-render current view so admin-only controls appear correctly
   if(State.currentBranch) renderBranch();
   if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
+  if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
 }
 
 function doLogout(){
@@ -5852,6 +5904,7 @@ function doLogout(){
   toast('已登出');
   if(State.currentBranch) renderBranch();
   if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
+  if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
 }
 
 // Allow pressing Enter in admin login modal
