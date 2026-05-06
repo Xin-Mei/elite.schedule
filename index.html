@@ -940,9 +940,51 @@
     padding:6px 10px;
     line-height:1.3;
   }
+  .name-pill.ptc-single{
+    /* Single name — render at full size like regular schedule pills */
+    font-size:16px;
+    padding:7px 18px;
+  }
   .ptc-name-line{
     display:block;
     font-size:13px;
+  }
+
+  /* ========== Bulk Fill Toolbar (admin only) ========== */
+  .ptc-bulk-toolbar{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px 16px;
+    margin-bottom:14px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .ptc-bulk-info{
+    font-family:"Noto Serif TC", serif;
+    font-size:14px;
+    color:var(--teal-800);
+    letter-spacing:1px;
+    margin-right:6px;
+  }
+  .ptc-bulk-dow{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    padding:5px 12px;
+    background:#f7f3e8;
+    border:1px solid var(--line);
+    border-radius:8px;
+    cursor:pointer;
+    font-size:13px;
+    transition:all .15s ease;
+  }
+  .ptc-bulk-dow:has(input:checked){
+    background:var(--teal-700);
+    color:#fff;
+    border-color:var(--teal-700);
   }
 
   /* ========== Part-time (工讀) — uses table.schedule for layout ========== */
@@ -2213,6 +2255,76 @@
   </div>
 </div>
 
+<!-- ========== Part-time Bulk Fill Modal ========== -->
+<div class="modal-back" id="ptcBulkFillModal">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-head">
+      <h3 id="ptcBulkFillTitle">批次填入工讀</h3>
+      <button class="modal-close" onclick="closeModal('ptcBulkFillModal')">×</button>
+    </div>
+    <div class="modal-body" style="padding:18px 22px;">
+      <div style="font-size:13px; color:var(--muted); letter-spacing:1px; margin-bottom:14px;" id="ptcBulkFillHint">
+        一次填入多格,大幅減少 key-in 次數。
+      </div>
+
+      <!-- Mode A: weekday -->
+      <div id="ptcBulkWeekdaySection">
+        <div class="form-row">
+          <label>選擇星期幾 (可複選)</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; padding:6px 0;">
+            <label class="ptc-bulk-dow"><input type="checkbox" value="0"/> <span>週日</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="1"/> <span>週一</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="2"/> <span>週二</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="3"/> <span>週三</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="4"/> <span>週四</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="5"/> <span>週五</span></label>
+            <label class="ptc-bulk-dow"><input type="checkbox" value="6"/> <span>週六</span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mode B: range -->
+      <div id="ptcBulkRangeSection" style="display:none;">
+        <div style="display:flex; gap:12px;">
+          <div class="form-row" style="flex:1;">
+            <label>起始日</label>
+            <input type="date" id="ptcBulkRangeStart"/>
+          </div>
+          <div class="form-row" style="flex:1;">
+            <label>結束日</label>
+            <input type="date" id="ptcBulkRangeEnd"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Common: shift + name + mode -->
+      <div class="form-row">
+        <label>班別</label>
+        <select id="ptcBulkShift">
+          <option value="morning">早班</option>
+          <option value="noon">午班</option>
+          <option value="evening">晚班</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>填入姓名 (多人以「、」分隔,留空 = 清空該班別)</label>
+        <input type="text" id="ptcBulkName" placeholder="例如:小貝 或 診-小貝、藥-小貝"/>
+      </div>
+      <div class="form-row">
+        <label>填入模式</label>
+        <div style="display:flex; gap:14px; padding:6px 0;">
+          <label><input type="radio" name="ptcBulkMode" value="overwrite" checked/> 覆蓋(取代原有資料)</label>
+          <label><input type="radio" name="ptcBulkMode" value="onlyEmpty"/> 只填空格</label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot" style="padding:12px 22px;">
+      <button class="btn" onclick="closeModal('ptcBulkFillModal')">取消</button>
+      <button class="btn primary" onclick="doPtcBulkFill()">套用</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== Pattern Chooser Modal ========== -->
 <div class="modal-back" id="patternChooserModal">
   <div class="modal" style="max-width:520px;">
@@ -2992,28 +3104,53 @@ function updateHash(){
   if(State.currentBranch){
     const h = `b=${encodeURIComponent(State.currentBranch)}&p=${encodeURIComponent(State.currentPosition || '櫃台')}`;
     history.replaceState(null, '', '#' + h);
+    // Also save to sessionStorage as a fallback (covers cases where hash was cleared)
+    try {
+      sessionStorage.setItem('elite_lastView', JSON.stringify({
+        branch: State.currentBranch,
+        position: State.currentPosition || '櫃台',
+        partTimeMonth: State.partTimeMonth || ''
+      }));
+    } catch(_){}
   } else {
     history.replaceState(null, '', location.pathname + location.search);
+    try { sessionStorage.removeItem('elite_lastView'); } catch(_){}
   }
 }
 
 function restoreFromHash(){
-  const hash = location.hash.replace(/^#/, '');
-  if(!hash) return false;
-  const params = {};
-  hash.split('&').forEach(kv => {
-    const [k, v] = kv.split('=');
-    if(k) params[k] = decodeURIComponent(v || '');
-  });
+  let hash = location.hash.replace(/^#/, '');
+  let params = {};
+  // Primary source: URL hash
+  if(hash){
+    hash.split('&').forEach(kv => {
+      const [k, v] = kv.split('=');
+      if(k) params[k] = decodeURIComponent(v || '');
+    });
+  }
+  // Fallback: sessionStorage
+  if(!params.b){
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('elite_lastView') || 'null');
+      if(saved && saved.branch){
+        params.b = saved.branch;
+        params.p = saved.position;
+        if(saved.partTimeMonth) params.m = saved.partTimeMonth;
+      }
+    } catch(_){}
+  }
   if(params.b && BRANCHES.includes(params.b)){
     State.currentBranch = params.b;
     State.currentPosition = (params.p && POSITIONS.includes(params.p)) ? params.p : '櫃台';
     State.currentPeriodIndex = 0;
+    if(params.m) State.partTimeMonth = params.m;
     $('homeView').style.display='none';
     $('branchView').classList.add('active');
     $('branchTitle').textContent = params.b + ' 院區';
     renderPositionBar();
     renderBranch();
+    // Re-write hash to ensure it matches what we restored
+    updateHash();
     return true;
   }
   return false;
@@ -3285,7 +3422,17 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       </tbody>
     </table>`;
 
-  let html = hoursTableHtml + `<table class="schedule"><thead><tr>
+  // ─── 批次填入工具列 (僅管理員) ───────────────────────────────────────
+  const bulkToolbarHtml = isAdmin ? `
+    <div class="ptc-bulk-toolbar">
+      <span class="ptc-bulk-info">⚡ 批次填入:</span>
+      <button class="btn" onclick="openPtcBulkFill('weekday')">📅 依星期幾批次填</button>
+      <button class="btn" onclick="openPtcBulkFill('range')">📆 整月/區間批次填</button>
+      <button class="btn" onclick="clearPtcMonth()" style="color:#a83838;">🗑 清空整月</button>
+    </div>
+  ` : '';
+
+  let html = hoursTableHtml + bulkToolbarHtml + `<table class="schedule"><thead><tr>
     <th class="shift">班</th>
     ${WEEKDAY_LABELS.map(w=>`<th>${w}</th>`).join('')}
   </tr></thead><tbody>`;
@@ -3327,9 +3474,14 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
         const cell = monthSched.shifts[ds] || {};
         const names = (cell[sr.key] || []).filter(n=>n);
         if(names.length){
-          // Stack each name as its own line (up to 2 rows visually)
-          const stacked = names.map(n=>`<span class="ptc-name-line">${n}</span>`).join('');
-          html += `<td><span class="name-pill ptc-multi" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${stacked}</span></td>`;
+          if(names.length === 1){
+            // Single name — render larger like a normal name-pill
+            html += `<td><span class="name-pill ptc-single" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${names[0]}</span></td>`;
+          } else {
+            // Multi name — stack each on its own line
+            const stacked = names.map(n=>`<span class="ptc-name-line">${n}</span>`).join('');
+            html += `<td><span class="name-pill ptc-multi" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${stacked}</span></td>`;
+          }
         } else {
           html += `<td><span class="name-pill empty" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">＋</span></td>`;
         }
@@ -3375,6 +3527,157 @@ async function editPtcHours(dow){
 }
 
 // Click handler — prompt for name, save to schedule
+// ─── BULK FILL — 工讀批次填入 (admin only) ────────────────────────────
+let _ptcBulkMode = 'weekday'; // 'weekday' or 'range'
+
+function openPtcBulkFill(mode){
+  if(State.user.role !== 'admin'){
+    toast('需要管理員權限','warn');
+    return;
+  }
+  _ptcBulkMode = mode;
+  const isWeekday = (mode === 'weekday');
+  $('ptcBulkFillTitle').textContent = isWeekday ? '依星期幾批次填入' : '整月/區間批次填入';
+  $('ptcBulkFillHint').textContent = isWeekday
+    ? '勾選一或多個星期幾,該月份所有對應日期將套用相同人員。'
+    : '指定日期區間,所有日期將套用相同人員。';
+  $('ptcBulkWeekdaySection').style.display = isWeekday ? '' : 'none';
+  $('ptcBulkRangeSection').style.display = isWeekday ? 'none' : '';
+
+  // Reset fields
+  document.querySelectorAll('.ptc-bulk-dow input').forEach(cb=>cb.checked=false);
+  $('ptcBulkName').value = '';
+  $('ptcBulkShift').value = 'morning';
+  document.querySelectorAll('input[name="ptcBulkMode"]').forEach(r=>r.checked = (r.value==='overwrite'));
+
+  // Default range: 1st - last day of current month
+  if(!isWeekday){
+    const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+    const last = new Date(yr, mo, 0).getDate();
+    $('ptcBulkRangeStart').value = `${yr}-${pad(mo)}-01`;
+    $('ptcBulkRangeEnd').value = `${yr}-${pad(mo)}-${pad(last)}`;
+  }
+
+  openModal('ptcBulkFillModal');
+}
+
+async function doPtcBulkFill(){
+  const setting = getCurrentSetting();
+  const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthSched = State.schedules[monthKey] || {shifts:{}};
+  monthSched.shifts = monthSched.shifts || {};
+
+  const shiftKey = $('ptcBulkShift').value;
+  const nameInput = $('ptcBulkName').value.trim();
+  const fillMode = (document.querySelector('input[name="ptcBulkMode"]:checked')||{}).value || 'overwrite';
+  const onlyEmpty = (fillMode === 'onlyEmpty');
+  // Parse names
+  const names = nameInput
+    ? nameInput.split(/[、,,\n]+/).map(s=>s.trim()).filter(Boolean)
+    : [];
+
+  // Build target dates list
+  const targetDates = [];
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  if(_ptcBulkMode === 'weekday'){
+    const dows = Array.from(document.querySelectorAll('.ptc-bulk-dow input:checked')).map(cb=>+cb.value);
+    if(!dows.length){
+      toast('請至少勾選一個星期幾','warn');
+      return;
+    }
+    for(let d=1; d<=daysInMonth; d++){
+      const dt = new Date(yr, mo-1, d);
+      if(dows.includes(dt.getDay())){
+        targetDates.push(fmt(dt));
+      }
+    }
+  } else {
+    const start = $('ptcBulkRangeStart').value;
+    const end = $('ptcBulkRangeEnd').value;
+    if(!start || !end){
+      toast('請選擇起始日與結束日','warn');
+      return;
+    }
+    const sD = parseDate(start), eD = parseDate(end);
+    if(eD < sD){
+      toast('結束日不可早於起始日','warn');
+      return;
+    }
+    let cur = new Date(sD);
+    while(cur <= eD){
+      // Only count dates within current month
+      if(cur.getFullYear() === yr && (cur.getMonth()+1) === mo){
+        targetDates.push(fmt(cur));
+      }
+      cur = addDays(cur, 1);
+    }
+  }
+  if(!targetDates.length){
+    toast('沒有符合條件的日期','warn');
+    return;
+  }
+
+  // Apply
+  let applied = 0, skipped = 0;
+  targetDates.forEach(ds => {
+    const cell = monthSched.shifts[ds] || {};
+    const existing = (cell[shiftKey]||[]).filter(Boolean);
+    if(onlyEmpty && existing.length){
+      skipped++;
+      return;
+    }
+    cell[shiftKey] = names.slice();
+    monthSched.shifts[ds] = cell;
+    applied++;
+  });
+  State.schedules[monthKey] = monthSched;
+
+  showLoading('儲存中…');
+  const res = await api('saveSchedule', {
+    branch: State.currentBranch,
+    position: '工讀',
+    periodStart: `${yr}-${pad(mo)}-01`,
+    data: monthSched
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('儲存失敗:'+(res.error||'未知錯誤'),'error');
+    return;
+  }
+  closeModal('ptcBulkFillModal');
+  renderBranchMonthly(setting);
+  const msg = onlyEmpty
+    ? `✓ 已填入 ${applied} 格 (略過 ${skipped} 格非空格)`
+    : `✓ 已套用 ${applied} 格`;
+  toast(msg);
+}
+
+async function clearPtcMonth(){
+  if(State.user.role !== 'admin') return;
+  const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+  if(!confirm(`確定清空 ${yr} 年 ${mo} 月所有工讀排班?\n\n此動作不可復原。`)) return;
+
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthSched = {shifts:{}};
+  State.schedules[monthKey] = monthSched;
+
+  showLoading('清空中…');
+  const res = await api('saveSchedule', {
+    branch: State.currentBranch,
+    position: '工讀',
+    periodStart: `${yr}-${pad(mo)}-01`,
+    data: monthSched
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('清空失敗:'+(res.error||'未知錯誤'),'error');
+    return;
+  }
+  renderBranchMonthly(getCurrentSetting());
+  toast(`✓ 已清空 ${yr} 年 ${mo} 月`);
+}
+
 async function onPartTimeSlotClick(date, shiftKey, shiftLabel){
   // Admin-only direct edit
   if(State.user.role !== 'admin'){
