@@ -4981,14 +4981,14 @@ async function submitApply(){
       return;
     }
 
-    showLoading('送出換班申請中…');
-    // 訪客送出換班 = 申請待審核 (status: 'pending')
-    // 寫入「_請假紀錄」(用 addLeave 而非 addSwap),管理員核准後才生效
-    // We write TWO records — one for each side of the swap
-    // so that after approval, both cells will turn gray and show the correct other person.
+    showLoading('送出換班中…');
+    // 訪客送出換班 — 通過工時檢核 → 立即生效 (status: 'approved')
+    // 不需管理員審核 (檢核已在前端完成)
+    // We write TWO swap records — one for each side of the swap
+    // so that on the schedule, both cells turn gray and show the correct other person.
     const baseTime = Date.now();
     const recA = {
-      id: 'A' + baseTime + '0',  // 'A' prefix → application (pending)
+      id: 'S' + baseTime + '0',
       branch, position, date, shift,
       originalName: name,
       reason: '換班',
@@ -4996,11 +4996,11 @@ async function submitApply(){
       swapWith: [partner],
       coverName: '',
       note,
-      status: 'pending',
+      status: 'approved',
       createdAt: new Date().toISOString()
     };
     const recB = {
-      id: 'A' + baseTime + '1',
+      id: 'S' + baseTime + '1',
       branch, position,
       date: targetDate, shift: targetShift,
       originalName: partner,
@@ -5009,15 +5009,15 @@ async function submitApply(){
       swapWith: [name],
       coverName: '',
       note: note ? note + ' (對方換班)' : '對方換班',
-      status: 'pending',
+      status: 'approved',
       createdAt: new Date().toISOString()
     };
-    let res = await api('addLeave', {record: recA});
+    let res = await api('addSwap', {record: recA});
     if(!res.ok){ hideLoading(); toast('送出失敗:'+(res.error||'未知錯誤'),'error'); return; }
-    res = await api('addLeave', {record: recB});
+    res = await api('addSwap', {record: recB});
     if(!res.ok){ hideLoading(); toast('送出失敗 (第二筆):'+(res.error||'未知錯誤'),'error'); return; }
     hideLoading();
-    toast('✓ 換班申請已送出,待管理員審核');
+    toast('✓ 換班已生效,班表已更新');
     closeModal('applyModal');
     await loadAllData();
     if(State.currentBranch) renderBranch();
