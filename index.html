@@ -987,6 +987,88 @@
     border-color:var(--teal-700);
   }
 
+  /* ========== Staff Pool (工讀人員池 — drag & drop) ========== */
+  .ptc-staff-pool{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px 16px;
+    margin-bottom:14px;
+  }
+  .ptc-staff-pool-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:10px;
+    gap:12px;
+  }
+  .ptc-staff-pool-title{
+    font-family:"Noto Serif TC", serif;
+    font-size:14px;
+    color:var(--teal-800);
+    letter-spacing:1.5px;
+  }
+  .ptc-staff-pool-hint{
+    font-size:11px;
+    color:var(--muted);
+    font-family:"Noto Sans TC", sans-serif;
+    letter-spacing:1px;
+    font-weight:400;
+    margin-left:6px;
+  }
+  .ptc-staff-chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  .ptc-staff-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:6px 12px;
+    background:#f0e6d6;
+    border:1px solid #d4c8a8;
+    border-radius:18px;
+    font-size:14px;
+    color:var(--teal-900);
+    cursor:grab;
+    user-select:none;
+    transition: all 0.15s ease;
+  }
+  .ptc-staff-chip:hover{
+    background:#e6d8b8;
+    transform:translateY(-1px);
+    box-shadow:0 2px 6px rgba(0,0,0,0.1);
+  }
+  .ptc-staff-chip:active{
+    cursor:grabbing;
+  }
+  .ptc-staff-chip.dragging{
+    opacity:0.5;
+  }
+  .ptc-staff-name{
+    font-weight:500;
+  }
+  .ptc-staff-del{
+    background:transparent;
+    border:none;
+    color:#a83838;
+    cursor:pointer;
+    font-size:16px;
+    line-height:1;
+    padding:0 2px;
+    border-radius:50%;
+    width:18px; height:18px;
+    display:inline-flex;
+    align-items:center; justify-content:center;
+  }
+  .ptc-staff-del:hover{
+    background:#fde6e6;
+  }
+  /* Drop target visual feedback */
+  table.schedule td.ptc-drop-target{
+    background:#e8f5e9 !important;
+    box-shadow: inset 0 0 0 2px var(--teal-700);
+  }
+
   /* ========== Part-time (工讀) — uses table.schedule for layout ========== */
   table.ptc-hours-table{
     width:100%;
@@ -1384,26 +1466,29 @@
   /* ========== Unsaved Changes Banner (batch save) ========== */
   .unsaved-banner{
     position:fixed;
-    bottom:24px; left:50%; transform:translateX(-50%) translateY(120%);
+    top:84px; right:24px;
+    transform:translateX(120%);
     z-index:90;
     background:#fff;
     border:2px solid #d4a83a;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
-    border-radius:14px;
-    padding:14px 22px;
-    display:flex; align-items:center; gap:24px;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.12);
+    border-radius:12px;
+    padding:10px 14px;
+    display:flex; align-items:center; gap:14px;
     transition: transform 0.35s cubic-bezier(.5,0,.3,1);
-    max-width:640px;
-    width:calc(100% - 40px);
+    max-width:380px;
   }
   .unsaved-banner.show{
-    transform:translateX(-50%) translateY(0);
+    transform:translateX(0);
   }
   /* Idle state: no unsaved changes — softer color, less attention-grabbing */
   .unsaved-banner.idle{
     border-color:#cfc7ad;
     background:#fdfaf0;
-    opacity:0.92;
+    opacity:0.85;
+  }
+  .unsaved-banner.idle:hover{
+    opacity:1;
   }
   .unsaved-banner.idle .ub-dot{
     background:#a99d80;
@@ -1414,8 +1499,36 @@
     color:#7a6c4e;
   }
   .unsaved-banner.idle .btn.primary{
-    opacity:0.6;
+    opacity:0.5;
     cursor:not-allowed;
+  }
+  .unsaved-banner .ub-info{
+    display:flex; align-items:center; gap:8px;
+    flex:1;
+    min-width:0;
+  }
+  .unsaved-banner .ub-title{
+    font-size:13px; font-weight:600;
+    color:var(--teal-900);
+    white-space:nowrap;
+  }
+  .unsaved-banner .ub-sub{
+    display:none;  /* Hide sub-text in compact mode */
+  }
+  .unsaved-banner .ub-actions{
+    display:flex; gap:6px;
+    flex-shrink:0;
+  }
+  .unsaved-banner .ub-actions .btn{
+    padding:5px 10px;
+    font-size:12px;
+  }
+  /* On mobile or narrow: collapse into a small floater */
+  @media (max-width: 720px){
+    .unsaved-banner{
+      top:auto; bottom:16px; right:16px; left:16px;
+      max-width:none;
+    }
   }
   .unsaved-banner .ub-info{
     display:flex; align-items:center; gap:12px;
@@ -3432,7 +3545,29 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </div>
   ` : '';
 
-  let html = hoursTableHtml + bulkToolbarHtml + `<table class="schedule"><thead><tr>
+  // ─── 工讀人員池 (可拖曳到任一格;管理員可新增/刪除) ─────────────────
+  const ptcStaff = (setting.employees || []).map(e => e.name).filter(Boolean);
+  const staffChipsHtml = ptcStaff.length
+    ? ptcStaff.map(n =>
+        `<span class="ptc-staff-chip" draggable="true"
+               ondragstart="onPtcStaffDragStart(event, '${n.replace(/'/g,"\\'")}')"
+               ondragend="onPtcStaffDragEnd(event)">
+           <span class="ptc-staff-name">${n}</span>
+           ${isAdmin ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
+         </span>`
+      ).join('')
+    : '<span style="color:var(--muted); font-size:13px;">尚未設定工讀人員</span>';
+  const staffPoolHtml = `
+    <div class="ptc-staff-pool">
+      <div class="ptc-staff-pool-head">
+        <span class="ptc-staff-pool-title">👥 工讀人員池 ${isAdmin ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
+        ${isAdmin ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
+      </div>
+      <div class="ptc-staff-chips">${staffChipsHtml}</div>
+    </div>
+  `;
+
+  let html = hoursTableHtml + bulkToolbarHtml + staffPoolHtml + `<table class="schedule"><thead><tr>
     <th class="shift">班</th>
     ${WEEKDAY_LABELS.map(w=>`<th>${w}</th>`).join('')}
   </tr></thead><tbody>`;
@@ -3473,17 +3608,18 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
         }
         const cell = monthSched.shifts[ds] || {};
         const names = (cell[sr.key] || []).filter(n=>n);
+        const dragAttrs = isAdmin
+          ? `ondragover="onPtcCellDragOver(event)" ondragleave="onPtcCellDragLeave(event)" ondrop="onPtcCellDrop(event,'${ds}','${sr.key}')"`
+          : '';
         if(names.length){
           if(names.length === 1){
-            // Single name — render larger like a normal name-pill
-            html += `<td><span class="name-pill ptc-single" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${names[0]}</span></td>`;
+            html += `<td ${dragAttrs}><span class="name-pill ptc-single" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${names[0]}</span></td>`;
           } else {
-            // Multi name — stack each on its own line
             const stacked = names.map(n=>`<span class="ptc-name-line">${n}</span>`).join('');
-            html += `<td><span class="name-pill ptc-multi" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${stacked}</span></td>`;
+            html += `<td ${dragAttrs}><span class="name-pill ptc-multi" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">${stacked}</span></td>`;
           }
         } else {
-          html += `<td><span class="name-pill empty" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">＋</span></td>`;
+          html += `<td ${dragAttrs}><span class="name-pill empty" onclick="onPartTimeSlotClick('${ds}','${sr.key}','${sr.label}')">＋</span></td>`;
         }
       }
       html += `</tr>`;
@@ -3527,6 +3663,112 @@ async function editPtcHours(dow){
 }
 
 // Click handler — prompt for name, save to schedule
+// ─── STAFF POOL (工讀人員池 — admin only) ──────────────────────────────
+async function addPtcStaff(){
+  if(State.user.role !== 'admin') return;
+  const name = prompt('新增工讀人員姓名:\n(例如:小貝、診-小貝)');
+  if(!name || !name.trim()) return;
+  const setting = getCurrentSetting();
+  setting.employees = setting.employees || [];
+  // Check duplicate
+  if(setting.employees.some(e => e.name === name.trim())){
+    toast(`「${name.trim()}」已存在於人員池`,'warn');
+    return;
+  }
+  setting.employees.push({group:'A', name: name.trim(), startIndex:1});
+
+  showLoading('儲存中…');
+  const res = await api('saveSettings', {
+    branch: State.currentBranch, position: '工讀', data: setting
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('儲存失敗','error');
+    return;
+  }
+  renderBranchMonthly(setting);
+  toast(`✓ 已新增「${name.trim()}」`);
+}
+
+async function removePtcStaff(name){
+  if(State.user.role !== 'admin') return;
+  if(!confirm(`從人員池移除「${name}」?\n\n注意:已排入月曆的記錄不會自動清除。`)) return;
+  const setting = getCurrentSetting();
+  setting.employees = (setting.employees || []).filter(e => e.name !== name);
+
+  showLoading('儲存中…');
+  const res = await api('saveSettings', {
+    branch: State.currentBranch, position: '工讀', data: setting
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('儲存失敗','error');
+    return;
+  }
+  renderBranchMonthly(setting);
+  toast(`✓ 已移除「${name}」`);
+}
+
+// Drag & drop handlers — staff chip → schedule cell
+function onPtcStaffDragStart(ev, name){
+  ev.dataTransfer.setData('text/plain', name);
+  ev.dataTransfer.effectAllowed = 'copy';
+  ev.target.classList.add('dragging');
+}
+function onPtcStaffDragEnd(ev){
+  ev.target.classList.remove('dragging');
+  // Also clear any leftover highlight
+  document.querySelectorAll('.ptc-drop-target').forEach(el => el.classList.remove('ptc-drop-target'));
+}
+function onPtcCellDragOver(ev){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+  ev.currentTarget.classList.add('ptc-drop-target');
+}
+function onPtcCellDragLeave(ev){
+  ev.currentTarget.classList.remove('ptc-drop-target');
+}
+async function onPtcCellDrop(ev, date, shiftKey){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('ptc-drop-target');
+  const name = ev.dataTransfer.getData('text/plain');
+  if(!name) return;
+
+  const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthSched = State.schedules[monthKey] || {shifts:{}};
+  monthSched.shifts = monthSched.shifts || {};
+  const cell = monthSched.shifts[date] || {};
+  const existing = (cell[shiftKey] || []).filter(Boolean);
+  // If already in cell — toast & abort
+  if(existing.includes(name)){
+    toast(`「${name}」已在此格`,'warn');
+    return;
+  }
+  // Append (max 2 names per cell — same rule as click-prompt)
+  if(existing.length >= 2){
+    if(!confirm(`此格已有 ${existing.length} 人,要替換為「${name}」嗎?`)) return;
+    cell[shiftKey] = [name];
+  } else {
+    cell[shiftKey] = existing.concat([name]);
+  }
+  monthSched.shifts[date] = cell;
+  State.schedules[monthKey] = monthSched;
+
+  showLoading('儲存中…');
+  const res = await api('saveSchedule', {
+    branch: State.currentBranch, position: '工讀',
+    periodStart: `${yr}-${pad(mo)}-01`, data: monthSched
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('儲存失敗','error');
+    return;
+  }
+  renderBranchMonthly(getCurrentSetting());
+  toast(`✓ 已加入「${name}」`);
+}
+
 // ─── BULK FILL — 工讀批次填入 (admin only) ────────────────────────────
 let _ptcBulkMode = 'weekday'; // 'weekday' or 'range'
 
@@ -5229,7 +5471,7 @@ function loadSettingsForPosition(){
 }
 
 // Toggle 工讀時段制 (3 時段 / 2 時段)
-function onPtModeChange(){
+async function onPtModeChange(){
   const branch = State.currentBranch;
   if(!branch) return;
   const setting = (State.settings[branch] && State.settings[branch]['工讀']);
@@ -5238,6 +5480,17 @@ function onPtModeChange(){
   setting.rules.partTimeMode = mode;
   // Re-render template (table column visibility changes)
   renderPartTimeTemplate(setting);
+  // Persist immediately so reload + 月曆顯示 reflect new mode
+  showLoading('儲存時段模式…');
+  const res = await api('saveSettings', {
+    branch: branch, position: '工讀', data: setting
+  });
+  hideLoading();
+  if(!res.ok){
+    toast('儲存失敗:'+(res.error||'未知錯誤'),'error');
+    return;
+  }
+  toast(`✓ 已切換為${mode === '2' ? '兩時段 (早/晚)' : '三時段 (早/午/晚)'}`);
 }
 
 // Render the weekday template editor for 工讀 position
