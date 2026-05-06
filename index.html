@@ -1984,15 +1984,11 @@
 
       <div class="form-row">
         <label>管理員帳號</label>
-        <input type="text" id="adminAccount" placeholder="如:admin" autocomplete="username"/>
+        <input type="text" id="adminAccount" placeholder="請輸入帳號" autocomplete="username"/>
       </div>
       <div class="form-row">
         <label>密碼</label>
         <input type="password" id="adminPwd" placeholder="請輸入密碼" autocomplete="current-password"/>
-      </div>
-
-      <div style="background:var(--teal-50); padding:10px 14px; border-radius:8px; font-size:12px; color:var(--muted); line-height:1.6; margin-top:8px;">
-        預設管理員 — 帳號:<code style="background:#fff; padding:1px 6px; border-radius:4px; color:var(--teal-800);">admin</code> 密碼:<code style="background:#fff; padding:1px 6px; border-radius:4px; color:var(--teal-800);">admin</code>
       </div>
     </div>
     <div class="modal-foot">
@@ -4985,12 +4981,14 @@ async function submitApply(){
       return;
     }
 
-    showLoading('送出換班中…');
-    // We write TWO swap records — one for each side of the swap
-    // so that on the schedule, both cells turn gray and show the correct other person.
+    showLoading('送出換班申請中…');
+    // 訪客送出換班 = 申請待審核 (status: 'pending')
+    // 寫入「_請假紀錄」(用 addLeave 而非 addSwap),管理員核准後才生效
+    // We write TWO records — one for each side of the swap
+    // so that after approval, both cells will turn gray and show the correct other person.
     const baseTime = Date.now();
     const recA = {
-      id: 'S' + baseTime + '0',
+      id: 'A' + baseTime + '0',  // 'A' prefix → application (pending)
       branch, position, date, shift,
       originalName: name,
       reason: '換班',
@@ -4998,11 +4996,11 @@ async function submitApply(){
       swapWith: [partner],
       coverName: '',
       note,
-      status: 'approved',
+      status: 'pending',
       createdAt: new Date().toISOString()
     };
     const recB = {
-      id: 'S' + baseTime + '1',
+      id: 'A' + baseTime + '1',
       branch, position,
       date: targetDate, shift: targetShift,
       originalName: partner,
@@ -5011,15 +5009,15 @@ async function submitApply(){
       swapWith: [name],
       coverName: '',
       note: note ? note + ' (對方換班)' : '對方換班',
-      status: 'approved',
+      status: 'pending',
       createdAt: new Date().toISOString()
     };
-    let res = await api('addSwap', {record: recA});
+    let res = await api('addLeave', {record: recA});
     if(!res.ok){ hideLoading(); toast('送出失敗:'+(res.error||'未知錯誤'),'error'); return; }
-    res = await api('addSwap', {record: recB});
+    res = await api('addLeave', {record: recB});
     if(!res.ok){ hideLoading(); toast('送出失敗 (第二筆):'+(res.error||'未知錯誤'),'error'); return; }
     hideLoading();
-    toast('✓ 換班已生效,班表已更新');
+    toast('✓ 換班申請已送出,待管理員審核');
     closeModal('applyModal');
     await loadAllData();
     if(State.currentBranch) renderBranch();
@@ -5059,42 +5057,94 @@ async function submitApply(){
 }
 
 async function approveApply(id){
-  if(!confirm('確定核准此筆申請?核准後班表將會調整為黃色標示。')) return;
-  showLoading('核准中…');
   const rec = (State.swaps || []).find(s => s.id === id);
-  if(!rec){ hideLoading(); toast('找不到該筆申請','error'); return; }
+  if(!rec){ toast('找不到該筆申請','error'); return; }
 
-  // Strategy 1: try in-place status update (works if sheet has status column)
-  let res = await api('updateSwapStatus', {id, status: 'approved'});
+  // For 換班 (mode === 'swap') — find paired record (the other side of the swap)
+  // Pairing rule: same createdAt second AND opposite originalName/swapWith
+  let pairedRec = null;
+  if(rec.mode === 'swap'){
+    pairedRec = (State.swaps || []).find(s =>
+      s.id !== rec.id &&
+      s.branch === rec.branch &&
+      s.position === rec.position &&
+      s.mode === 'swap' &&
+      s.originalName === (rec.swapWith && rec.swapWith[0]) &&
+      (s.swapWith && s.swapWith[0]) === rec.originalName &&
+      // Same approval batch (created within 5 seconds of each other)
+      Math.abs(new Date(s.createdAt) - new Date(rec.createdAt)) < 5000
+    );
+  }
 
-  // Strategy 2 (fallback): delete + re-insert with status='approved'
-  // This works even on legacy sheets without a status column
-  if(!res.ok){
-    await api('deleteSwap', {id});
-    const newRec = Object.assign({}, rec, {
-      id: 'S' + Date.now(),       // fresh swap id (no longer 'A...')
-      status: 'approved',
-      createdAt: new Date().toISOString()
-    });
-    res = await api('addSwap', {record: newRec});
+  const confirmMsg = pairedRec
+    ? `確定核准此筆換班申請?\n${rec.date} ${rec.shift}班 ${rec.originalName} ⇄ ${pairedRec.date} ${pairedRec.shift}班 ${pairedRec.originalName}\n\n核准後雙方班表將自動對調並以灰底顯示。`
+    : `確定核准此筆申請?核准後班表將會更新並以對應顏色標示。`;
+  if(!confirm(confirmMsg)) return;
+
+  showLoading('核准中…');
+
+  // Approve helper — uses status update if possible, fallback to delete+reinsert
+  const approveOne = async (r) => {
+    let res = await api('updateSwapStatus', {id: r.id, status: 'approved'});
     if(!res.ok){
+      // Fallback: delete + re-insert with status='approved'
+      await api('deleteSwap', {id: r.id});
+      const newRec = Object.assign({}, r, {
+        // Drop 'A' prefix since this is no longer pending
+        id: (r.mode === 'swap' ? 'S' : 'L') + Date.now() + Math.floor(Math.random()*100),
+        status: 'approved',
+        createdAt: new Date().toISOString()
+      });
+      const apiAction = (r.mode === 'leave' || r.mode === 'support') ? 'addLeave' : 'addSwap';
+      res = await api(apiAction, {record: newRec});
+    }
+    return res;
+  };
+
+  const r1 = await approveOne(rec);
+  if(!r1.ok){
+    hideLoading();
+    toast('核准失敗:' + (r1.error || '寫入失敗'), 'error');
+    return;
+  }
+  if(pairedRec){
+    const r2 = await approveOne(pairedRec);
+    if(!r2.ok){
       hideLoading();
-      toast('核准失敗:' + (res.error || '寫入失敗'), 'error');
+      toast('已核准第一筆,但配對的第二筆失敗:' + (r2.error || '寫入失敗'), 'error');
       return;
     }
   }
 
   await loadAllData();
   hideLoading();
-  toast('✓ 已核准,班表已更新');
+  toast(pairedRec ? '✓ 換班已核准,雙方班表已對調' : '✓ 已核准,班表已更新');
   renderRecords();
   if(State.currentBranch) renderBranch();
 }
 
 async function rejectApply(id){
-  if(!confirm('確定駁回此筆申請?')) return;
+  const rec = (State.swaps || []).find(s => s.id === id);
+  if(!rec){ toast('找不到該筆申請','error'); return; }
+
+  // Find paired record for swap
+  let pairedRec = null;
+  if(rec.mode === 'swap'){
+    pairedRec = (State.swaps || []).find(s =>
+      s.id !== rec.id &&
+      s.branch === rec.branch &&
+      s.position === rec.position &&
+      s.mode === 'swap' &&
+      s.originalName === (rec.swapWith && rec.swapWith[0]) &&
+      (s.swapWith && s.swapWith[0]) === rec.originalName &&
+      Math.abs(new Date(s.createdAt) - new Date(rec.createdAt)) < 5000
+    );
+  }
+
+  if(!confirm(pairedRec ? '確定駁回此換班申請 (兩筆配對紀錄都會被刪除)?' : '確定駁回此筆申請?')) return;
   showLoading('處理中…');
   await api('deleteSwap', {id});
+  if(pairedRec) await api('deleteSwap', {id: pairedRec.id});
   await loadAllData();
   hideLoading();
   toast('已駁回');
