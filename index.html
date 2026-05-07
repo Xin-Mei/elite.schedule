@@ -6317,6 +6317,10 @@ async function loadAllRecords(){
    DOWNLOAD A4 (compress entire 8-week period to single A4 portrait)
    ===================================================================== */
 async function downloadA4(){
+  // 工讀職位:用月曆排班表的版型,而不是 8 週區間的版型
+  if(State.currentPosition === '工讀'){
+    return downloadA4PartTime();
+  }
   showLoading('產生 A4 圖片…');
   const setting = getCurrentSetting();
   const period = setting.periods[State.currentPeriodIndex];
@@ -6575,6 +6579,320 @@ async function downloadA4(){
 }
 
 /* =====================================================================
+   DOWNLOAD A4 — 工讀月曆專用版型
+   結構與網頁瀏覽的 renderPartTimeCalendar 一致:
+     1. 診助上班時間表格 (週日~週六,兩列時段)
+     2. 月曆排班表 (依 partTimeMode 決定 2 或 3 個時段列)
+   不含管理員專用元素 (人員池、批次填入工具列)。
+   ===================================================================== */
+async function downloadA4PartTime(){
+  showLoading('產生 A4 圖片…');
+  const setting = getCurrentSetting();
+
+  // 確保 partTimeMonth 已設定
+  if(!State.partTimeMonth){
+    const now = new Date();
+    State.partTimeMonth = now.getFullYear() + '-' + pad(now.getMonth()+1);
+  }
+  const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+  const monthStart = new Date(yr, mo-1, 1);
+  const firstWeekday = monthStart.getDay();
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
+  const monthSched = State.schedules[monthKey] || {shifts:{}};
+
+  // 時段設定
+  const SHIFT_DEFS_ALL = [
+    {key:'morning', label:'早', display:'早'},
+    {key:'noon',    label:'午', display:'午'},
+    {key:'evening', label:'晚', display:'晚'},
+  ];
+  const ptMode = setting.rules.partTimeMode || '3';
+  const SHIFT_DEFS = (ptMode === '2')
+    ? [SHIFT_DEFS_ALL[0], SHIFT_DEFS_ALL[2]]
+    : SHIFT_DEFS_ALL;
+
+  // 週模板 (決定哪些日子的哪些時段是「休」)
+  const weekTemplate = setting.rules.weekTemplate || [
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+    {enabled:[true,true,true], counts:[0,0,0]},
+  ];
+
+  // 診助上班時間 (兩列時段,週日~週六)
+  const rawHours = setting.rules.weekHours || [];
+  const weekHours = Array.from({length:7}, (_, i) => {
+    const v = rawHours[i];
+    if(typeof v === 'string') return {r1: v, r2: ''};
+    if(v && typeof v === 'object') return {r1: v.r1 || '', r2: v.r2 || ''};
+    return {r1:'', r2:''};
+  });
+  const weekDayLabels = ['日','一','二','三','四','五','六'];
+
+  // 計算月曆涵蓋的週數 (從該月 1 號往前推到週日,再算到月底之後最晚的週六)
+  const calStart = addDays(monthStart, -firstWeekday);
+  const totalCells = firstWeekday + daysInMonth;
+  const totalWeeks = Math.ceil(totalCells / 7);
+
+  // 取得本月所有與此排班相關的換班/支援/假別紀錄
+  const monthSwapsAll = (State.swaps || []).filter(s =>
+    s.branch === State.currentBranch &&
+    s.position === '工讀' &&
+    !isPendingApplication(s) &&
+    s.date && s.date.startsWith(`${yr}-${pad(mo)}-`)
+  );
+  const swapMap = {};
+  monthSwapsAll.forEach(s=>{
+    const k = s.date+'_'+s.shift+'_'+s.originalName;
+    if(!swapMap[k] || swapMap[k].createdAt < s.createdAt) swapMap[k] = s;
+  });
+
+  // ─── 構建上方「診助上班時間」表格 HTML ──────────────────
+  const hoursTableHtml = `
+    <table style="width:100%; border-collapse:collapse; margin-bottom:14px; font-size:11px;">
+      <thead>
+        <tr>
+          <th colspan="7" style="text-align:left; padding:8px 14px; background:var(--teal-50); font-family:'Noto Serif TC',serif; font-size:14px; color:var(--teal-900); letter-spacing:2px; border:1px solid #e3dcc6;">
+            ⏰ 診助上班時間
+          </th>
+        </tr>
+        <tr>
+          ${weekDayLabels.map(d=>`<th style="padding:6px 4px; background:#f7f1e3; color:var(--teal-800); font-family:'Noto Serif TC',serif; font-size:12px; letter-spacing:2px; font-weight:700; border:1px solid #e3dcc6; width:14.2857%;">週${d}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          ${weekHours.map(h => {
+            const r1 = h.r1 || '<span style="color:#bbb;">—</span>';
+            const r2 = h.r2 || '<span style="color:#bbb;">—</span>';
+            return `<td style="padding:6px 4px; text-align:center; vertical-align:middle; border:1px solid #e3dcc6; background:#fbf8f0; font-size:11px; line-height:1.4;">
+              <div>${r1}</div>
+              <div>${r2}</div>
+            </td>`;
+          }).join('')}
+        </tr>
+      </tbody>
+    </table>`;
+
+  // ─── 構建月曆排班表 HTML ──────────────────
+  let calendarHtml = `<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>
+    <th style="width:32px; padding:8px 4px; background:var(--teal-50); color:var(--teal-800); font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; letter-spacing:2px; border:1px solid #e3dcc6;">班</th>
+    ${WEEKDAY_LABELS.map(w=>`<th style="padding:8px 4px; background:var(--teal-50); color:var(--teal-800); font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; letter-spacing:2px; border:1px solid #e3dcc6;">${w}</th>`).join('')}
+  </tr></thead><tbody>`;
+
+  for(let w=0; w<totalWeeks; w++){
+    // 日期列
+    calendarHtml += `<tr>`;
+    calendarHtml += `<td style="padding:5px 2px; text-align:center; background:#f7f1e3; color:var(--teal-900); font-weight:700; font-size:11px; border:1px solid #e3dcc6;">日期</td>`;
+    for(let d=0; d<7; d++){
+      const dt = addDays(calStart, w*7+d);
+      const inMonth = (dt.getMonth() === mo-1);
+      const dateLabel = inMonth ? fmtMD(dt) : '';
+      const cellBg = inMonth ? '#f7f1e3' : '#f0ede4';
+      const cellFg = inMonth ? 'var(--teal-900)' : '#cccccc';
+      calendarHtml += `<td style="padding:5px 2px; text-align:center; background:${cellBg}; color:${cellFg}; font-weight:700; font-size:11px; border:1px solid #e3dcc6;">${dateLabel}</td>`;
+    }
+    calendarHtml += `</tr>`;
+
+    // 各時段列
+    SHIFT_DEFS.forEach((sr, idx) => {
+      const sIdx = SHIFT_DEFS_ALL.findIndex(s => s.key === sr.key);
+      calendarHtml += `<tr>`;
+      calendarHtml += `<td style="padding:6px 2px; text-align:center; color:var(--muted); font-size:11px; border:1px solid #e3dcc6; background:#fbf8f0;">${sr.display}</td>`;
+      for(let d=0; d<7; d++){
+        const dt = addDays(calStart, w*7+d);
+        const ds = fmt(dt);
+        const inMonth = (dt.getMonth() === mo-1);
+        if(!inMonth){
+          calendarHtml += `<td style="padding:6px 2px; background:#f0ede4; border:1px solid #e3dcc6;"></td>`;
+          continue;
+        }
+        const dow = dt.getDay();
+        const tpl = weekTemplate[dow] || {enabled:[false,false,false]};
+        const enabled = tpl.enabled.slice();
+        if(!enabled[sIdx]){
+          // 此時段不開 → 顯示「休」(僅在第一個時段列顯示一次)
+          const restMark = (idx === 0)
+            ? '<span style="color:#aaa; font-size:11px; letter-spacing:2px;">休</span>'
+            : '';
+          calendarHtml += `<td style="padding:6px 2px; text-align:center; background:#faf7ef; border:1px solid #e3dcc6;">${restMark}</td>`;
+          continue;
+        }
+        const cell = monthSched.shifts[ds] || {};
+        const names = (cell[sr.key] || []).filter(n=>n);
+
+        // 套用換班/支援/缺人覆蓋
+        const renderName = (n) => {
+          const swap = swapMap[ds+'_'+sr.label+'_'+n];
+          const parseCover = (str) => {
+            if(!str) return {name:'', branch:''};
+            const m = String(str).match(/^(.*?)\s*\((.+?)\)\s*$/);
+            if(m) return {name:m[1].trim(), branch:m[2].trim()};
+            return {name:String(str).trim(), branch:''};
+          };
+          if(swap){
+            let displayHtml, bg, fg;
+            if(swap.mode === 'swap'){
+              displayHtml = (swap.swapWith && swap.swapWith[0]) || n;
+              bg = '#dcd9d0'; fg = '#2a2a2a';
+            } else if(swap.mode === 'support'){
+              const cv = parseCover(swap.coverName || n);
+              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              bg = '#fef3c7'; fg = '#5e4914';
+            } else {
+              const cv = parseCover(swap.coverName || n);
+              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              bg = '#fde6e6'; fg = '#a83838';
+            }
+            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}</span>`;
+          }
+          // 一般人員(工讀沒有 ABCD 分組,使用通用青綠色 pill)
+          return `<span style="display:inline-block; background:#e7eff5; color:#345d7a; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${n}</span>`;
+        };
+
+        if(names.length){
+          // 多人時垂直堆疊;單人時直接顯示
+          const stacked = names.map(n => renderName(n)).join('<br>');
+          calendarHtml += `<td style="padding:4px 2px; text-align:center; background:#fbf8f0; border:1px solid #e3dcc6; vertical-align:middle;">${stacked}</td>`;
+        } else {
+          calendarHtml += `<td style="padding:6px 2px; text-align:center; background:#fbf8f0; border:1px solid #e3dcc6;"><span style="color:#cfc7b0; font-size:11px;">－</span></td>`;
+        }
+      }
+      calendarHtml += `</tr>`;
+    });
+  }
+  calendarHtml += `</tbody></table>`;
+
+  // 統計每位工讀人員本月總出勤格數 (含換班後實際上班的格數)
+  const ptcStaff = (setting.employees || []).map(e => e.name).filter(Boolean);
+  const workCount = {};
+  ptcStaff.forEach(n => { workCount[n] = 0; });
+  // 遍歷月內所有日期,計算每人實際在該日的工作格數
+  for(let day=1; day<=daysInMonth; day++){
+    const ds = `${yr}-${pad(mo)}-${pad(day)}`;
+    const cell = monthSched.shifts[ds] || {};
+    SHIFT_DEFS.forEach(sr => {
+      const names = (cell[sr.key] || []).filter(n=>n);
+      names.forEach(n => {
+        const swap = swapMap[ds+'_'+sr.label+'_'+n];
+        if(swap){
+          // 該員工被換掉/請假 → 不算他的工作格
+          // 換班的對象(swap.swapWith[0])此處不加,因為他可能在別格中已被算到
+          return;
+        }
+        if(workCount[n] !== undefined) workCount[n]++;
+      });
+    });
+  }
+  const summaryCardsHtml = ptcStaff.length
+    ? ptcStaff.map(n => `
+        <div style="flex:1; min-width:120px; background:#e7eff5; padding:10px 14px; border-radius:10px; border:1px solid rgba(0,0,0,0.05);">
+          <div style="font-size:10px; letter-spacing:2px; color:var(--muted); margin-bottom:2px;">工讀</div>
+          <div style="display:flex; align-items:baseline; gap:6px;">
+            <span style="font-family:'Noto Serif TC',serif; font-size:14px; font-weight:600; color:var(--teal-900);">${n}</span>
+            <span style="font-family:'Noto Sans TC',sans-serif; font-size:22px; font-weight:700; color:#345d7a;">${workCount[n] || 0}</span>
+            <span style="font-size:11px; color:var(--muted);">格</span>
+          </div>
+        </div>`).join('')
+    : '';
+
+  // ─── 組裝完整 A4 頁面 ──────────────────
+  // 從 header 取出實際 logo 圖檔 (避免重複 base64);若取不到就用占位符
+  const headerLogo = document.querySelector('.brand-logo img');
+  const logoSrc = (headerLogo && headerLogo.src) ? headerLogo.src : '';
+  const logoHtml = logoSrc
+    ? `<img src="${logoSrc}" alt="Elite Clinic" style="width:48px; height:48px; border-radius:50%; object-fit:cover; flex-shrink:0;"/>`
+    : `<div style="width:48px; height:48px; border-radius:50%; background:var(--teal-700); color:#fbf8f0; display:flex; align-items:center; justify-content:center; font-family:'Cormorant Garamond',serif; font-style:italic; font-size:24px; font-weight:600; flex-shrink:0;">E</div>`;
+
+  const printArea = $('printArea');
+  printArea.innerHTML = `<div class="a4-portrait" id="a4Sheet" style="width:794px; padding:32px 36px; box-sizing:border-box; background:#fbf8f0; font-family:'Noto Sans TC',sans-serif; color:var(--ink);">
+    <div style="display:flex; align-items:center; gap:14px; padding-bottom:14px; border-bottom:2px solid var(--teal-700); margin-bottom:18px;">
+      ${logoHtml}
+      <div>
+        <div style="font-family:'Noto Serif TC',serif; font-size:24px; font-weight:600; color:var(--teal-900); letter-spacing:3px;">金鶯診所　Elite Clinic</div>
+        <div style="font-family:'Cormorant Garamond',serif; font-style:italic; color:var(--teal-700); font-size:12px; letter-spacing:3px;">EMPLOYEE SHIFT SCHEDULE · since 2013</div>
+      </div>
+    </div>
+
+    <div style="font-family:'Noto Serif TC',serif; color:var(--teal-900); font-size:20px; font-weight:700; letter-spacing:3px; margin-bottom:14px; text-align:center;">
+      ${tw(yr)}年 ${mo} 月　${State.currentBranch}　工讀　排班表
+    </div>
+
+    ${summaryCardsHtml ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+      ${summaryCardsHtml}
+    </div>` : ''}
+
+    ${hoursTableHtml}
+
+    ${calendarHtml}
+  </div>`;
+
+  // ─── html2canvas 輸出 (與一般 A4 路徑共用,維持 A4 直版尺寸) ──────────────────
+  try{
+    const a4El = $('a4Sheet');
+    const imgs = Array.from(a4El.querySelectorAll('img'));
+    await Promise.all(imgs.map(img => {
+      if(img.complete && img.naturalWidth > 0) return Promise.resolve();
+      return new Promise(resolve => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        setTimeout(resolve, 1500);
+      });
+    }));
+
+    const canvas = await html2canvas(a4El, {
+      scale: 2,
+      backgroundColor: '#fbf8f0',
+      useCORS: true,
+      allowTaint: true,
+      width: 794,
+      height: a4El.offsetHeight,
+    });
+
+    const A4_W = 1588;
+    const A4_H = 2246;
+    const final = document.createElement('canvas');
+    final.width = A4_W;
+    final.height = A4_H;
+    const ctx = final.getContext('2d');
+    ctx.fillStyle = '#fbf8f0';
+    ctx.fillRect(0, 0, A4_W, A4_H);
+
+    const srcAR = canvas.width / canvas.height;
+    const dstAR = A4_W / A4_H;
+    let drawW, drawH, dx, dy;
+    if(srcAR > dstAR){
+      drawW = A4_W;
+      drawH = A4_W / srcAR;
+      dx = 0;
+      dy = (A4_H - drawH) / 2;
+    } else {
+      drawH = A4_H;
+      drawW = A4_H * srcAR;
+      dx = (A4_W - drawW) / 2;
+      dy = 0;
+    }
+    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, dx, dy, drawW, drawH);
+
+    const imgData = final.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `金鶯診所_${State.currentBranch}_工讀_${yr}-${pad(mo)}_排班.png`;
+    link.href = imgData;
+    link.click();
+
+    hideLoading();
+    toast('工讀排班圖片已下載 (A4 直,PNG)');
+  }catch(err){
+    hideLoading();
+    toast('下載失敗:'+err.message,'error');
+  }
+}
+
+/* =====================================================================
    SETUP SCREEN (Apps Script URL)
    ===================================================================== */
 function openSetup(){
@@ -6627,6 +6945,12 @@ function applyRole(){
   }
 }
 
+// Hardcoded admin credentials (must match Code.gs HARDCODED_ADMIN_ID/PWD)
+// Used as a client-side fast-path so the admin login works even if the
+// backend hasn't been redeployed to v4 yet.
+const HARDCODED_ADMIN_ID  = 'meiiibaiii';
+const HARDCODED_ADMIN_PWD = 'meiiibaiii000';
+
 // ─── Unified Login Gate (admin or employee in one form) ────────────
 async function doEmployeeLogin(){
   const id  = $('empLoginId').value.trim();
@@ -6637,6 +6961,27 @@ async function doEmployeeLogin(){
   if(!id || !pwd){
     errBox.textContent = '請輸入員工編號與密碼';
     errBox.classList.add('show');
+    return;
+  }
+
+  // ── Fast-path: hardcoded admin (bypasses backend round-trip) ──────
+  // 確保 meiiibaiii/meiiibaiii000 一律直接登入為管理員,不需等待後端,
+  // 也不需要二次驗證或彈出管理員登入視窗。
+  if(id === HARDCODED_ADMIN_ID && pwd === HARDCODED_ADMIN_PWD){
+    State.user = {
+      account: HARDCODED_ADMIN_ID,
+      name: '系統管理員',
+      role: 'admin'
+    };
+    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    sessionStorage.removeItem('elite_emp');
+    applyRole();
+    closeEmployeeGate();
+    toast(`歡迎,系統管理員`);
+    if(State.currentBranch) renderBranch();
+    const homeRecEl = document.getElementById('homeRecords');
+    if(homeRecEl && homeRecEl.style.display !== 'none') renderRecords();
+    if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
     return;
   }
 
