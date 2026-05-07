@@ -705,6 +705,13 @@
     font-size:17px;
     font-family:inherit;
     color:var(--ink);
+    /* 修正在 grid (form-grid / form-grid-3) 中超框的問題:
+       width:100% 確保填滿欄寬,box-sizing 把 padding 算進寬度裡,
+       min-width:0 解除瀏覽器預設的「不小於內容寬度」限制 */
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+    min-width:0;
   }
   .form-row input:focus, .form-row select:focus, .form-row textarea:focus{
     outline:none; border-color:var(--teal-600);
@@ -714,6 +721,11 @@
     display:grid; grid-template-columns:1fr 1fr; gap:14px;
   }
   .form-grid-3{grid-template-columns:1fr 1fr 1fr;}
+  /* grid 子項預設不會收縮到比內容小 — 加 min-width:0 讓 input 可被收縮 */
+  .form-grid > .form-row,
+  .form-grid-3 > .form-row{
+    min-width:0;
+  }
 
   /* 兩段班 — 分段容器 */
   .split-segment{
@@ -862,6 +874,47 @@
   .records-list{
     background:#fff; border-radius:18px; padding:16px;
     border:1px solid var(--line);
+  }
+  /* 篩選列 — 員工 / 假別 / 院區 / 職位 + 重置 */
+  .records-filter-bar{
+    display:flex; flex-wrap:wrap; gap:12px;
+    align-items:flex-end;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px 18px;
+    margin-bottom:16px;
+  }
+  .records-filter-bar .rf-item{
+    display:flex; flex-direction:column; gap:4px;
+    flex:1 1 160px; min-width:140px;
+  }
+  .records-filter-bar .rf-item label{
+    font-size:12px; letter-spacing:1.5px; color:var(--muted);
+    font-weight:500;
+  }
+  .records-filter-bar .rf-item select{
+    padding:8px 12px;
+    border-radius:8px;
+    border:1px solid var(--line);
+    background:#fff;
+    font-size:14px;
+    font-family:inherit;
+    color:var(--ink);
+    width:100%;
+    box-sizing:border-box;
+    min-width:0;
+    cursor:pointer;
+  }
+  .records-filter-bar .rf-item select:focus{
+    outline:none; border-color:var(--teal-600);
+    box-shadow:0 0 0 3px rgba(63,184,179,0.18);
+  }
+  .records-filter-bar .rf-reset{
+    flex-shrink:0;
+  }
+  @media (max-width: 720px){
+    .records-filter-bar .rf-item{flex: 1 1 calc(50% - 6px);}
   }
   .record-item{
     display:grid;
@@ -1739,6 +1792,18 @@
     border-top:1px dashed currentColor;
     opacity:0.4;
   }
+  /* 兩段班 — 該段獨立的備註小字 */
+  .name-pill .split-seg-note{
+    display:block;
+    font-size:9px;
+    font-weight:400;
+    margin-top:2px;
+    line-height:1.2;
+    opacity:0.85;
+    word-break:break-word;
+    white-space:normal;
+    font-family:"Noto Sans TC", sans-serif;
+  }
 
   /* ========== Cell quick-action floating menu ========== */
   .cell-menu{
@@ -2179,6 +2244,36 @@
     <div class="action-toolbar" style="padding-left:0;padding-right:0;">
       <button class="btn" onclick="loadAllRecords()">↻ 重新載入</button>
     </div>
+
+    <!-- 篩選區:管理員可依員工/假別/院區/職位快速過濾 -->
+    <div class="records-filter-bar" id="recordsFilterBar">
+      <div class="rf-item">
+        <label>員工(原本人員)</label>
+        <select id="rfEmployee" onchange="renderRecords()">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div class="rf-item">
+        <label>原因/假別</label>
+        <select id="rfReason" onchange="renderRecords()">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div class="rf-item">
+        <label>院區</label>
+        <select id="rfBranch" onchange="renderRecords()">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <div class="rf-item">
+        <label>職位</label>
+        <select id="rfPosition" onchange="renderRecords()">
+          <option value="">全部</option>
+        </select>
+      </div>
+      <button class="btn rf-reset" onclick="resetRecordsFilter()">↺ 重置篩選</button>
+    </div>
+
     <div class="records-list" id="recordsList"></div>
   </div>
 </section>
@@ -2477,6 +2572,10 @@
                 <input type="text" id="swapSplitName1" placeholder="如:王小美"/>
               </div>
             </div>
+            <div class="form-row" style="margin-bottom:0; margin-top:8px;">
+              <label>第一段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+              <input type="text" id="swapSplitNote1" placeholder="此段附註(例:DR16)"/>
+            </div>
           </div>
           <div class="split-segment">
             <div class="split-segment-head">第二段</div>
@@ -2500,9 +2599,13 @@
                 <input type="text" id="swapSplitName2" placeholder="如:張小帆"/>
               </div>
             </div>
+            <div class="form-row" style="margin-bottom:0; margin-top:8px;">
+              <label>第二段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+              <input type="text" id="swapSplitNote2" placeholder="此段附註(例:DR47)"/>
+            </div>
           </div>
           <div style="font-size:13px; color:var(--muted); margin-top:6px;">
-            送出後班表會顯示為紅底,並依序列出兩段代班人員資訊
+            送出後班表會顯示為紅底,並依序列出兩段代班人員資訊與各自備註
           </div>
         </div>
       </div>
@@ -2510,7 +2613,8 @@
       <!-- Hidden actual cover holder (read by submitSwap) -->
       <input type="hidden" id="swapCover" value=""/>
 
-      <div class="form-row">
+      <!-- 共用備註欄 (兩段班時會隱藏,改用每段內的備註) -->
+      <div class="form-row" id="swapNoteRow">
         <label>備註</label>
         <textarea id="swapNote" rows="2" placeholder="附註說明 (選填)"></textarea>
       </div>
@@ -4520,11 +4624,20 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         pillContent = (swap.swapWith && swap.swapWith[0]) || n;
         modeClass = 'mode-swap';
       } else if(splitCovers){
-        // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區)
+        // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區 + 該段備註)
+        // 隱私規則:leave 模式 (兩段班一定屬於 leave) 的備註只給管理員看
+        const canSeeSegNote = isAdmin || swap.mode === 'support';
         pillContent = splitCovers.map((c, i) => {
           const branchHtml = c.branch ? `<span class="cover-branch">${c.branch}</span>` : '';
           const sep = i > 0 ? '<span class="split-sep">／</span>' : '';
-          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${branchHtml}`;
+          // 該段備註(僅有權限者可見)
+          let segNoteHtml = '';
+          const segNoteText = String(c.note || '').trim();
+          if(segNoteText && canSeeSegNote){
+            const safe = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            segNoteHtml = `<span class="split-seg-note">${safe}</span>`;
+          }
+          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${branchHtml}${segNoteHtml}`;
         }).join('');
         modeClass = (swap.mode === 'support') ? 'mode-support' : 'mode-leave';
       } else if(swap.mode === 'support'){
@@ -4543,12 +4656,12 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       // ─── 備註顯示 (取代原本的缺人/假別文字註記) ───────────────
       // 隱私規則:
       //   • leave 模式 (請假) 的備註只給管理員看到,員工看不到
-      //   • 換班 / 私事支援 / 兩段班 → 備註所有人都看得到
-      //   • 不論是否管理員,排班表 cell 上「皆不顯示假別文字」(如缺人/產檢等),
-      //     要看假別請至「班別異動記錄」分頁,或透過 hover tooltip (僅管理員)
+      //   • 換班 / 私事支援 → 備註所有人都看得到
+      //   • 兩段班的備註已在上方分段顯示,此處不重複輸出
+      //   • 不論是否管理員,排班表 cell 上「皆不顯示假別文字」(如缺人/產檢等)
       const noteText = String(swap.note || '').trim();
       let noteHtml = '';
-      if(noteText){
+      if(noteText && !splitCovers){
         const canSeeNote = isAdmin || swap.mode === 'swap' || swap.mode === 'support';
         if(canSeeNote){
           // 換行顯示在 pill 下方;HTML escape 以防備註內含特殊字元
@@ -4806,11 +4919,13 @@ function openSwapModal(date, shift, name){
             $('swapSplitPeriod1').value = splits[0].period || '早';
             $('swapSplitBranch1').value = splits[0].branch || '';
             $('swapSplitName1').value   = splits[0].name   || '';
+            $('swapSplitNote1').value   = splits[0].note   || '';
           }
           if(splits[1]){
             $('swapSplitPeriod2').value = splits[1].period || '晚';
             $('swapSplitBranch2').value = splits[1].branch || '';
             $('swapSplitName2').value   = splits[1].name   || '';
+            $('swapSplitNote2').value   = splits[1].note   || '';
           }
           // 開啟兩段班勾選 (applySwapModeUI 會根據 shift 與勾選狀態決定顯不顯示)
           const cb = $('swapSplitToggle');
@@ -4838,7 +4953,9 @@ function openSwapModal(date, shift, name){
     // Reset 兩段班 fields
     const cb = $('swapSplitToggle');
     if(cb) cb.checked = false;
-    ['swapSplitName1','swapSplitName2'].forEach(id => { const el = $(id); if(el) el.value = ''; });
+    ['swapSplitName1','swapSplitName2','swapSplitNote1','swapSplitNote2'].forEach(id => {
+      const el = $(id); if(el) el.value = '';
+    });
     $('swapRestoreBtn').style.display = 'none';
   }
 
@@ -5561,6 +5678,10 @@ function onSwapSplitToggle(){
   if(single)   single.style.display   = checked ? 'none' : '';
   if(splitBlk) splitBlk.style.display = checked ? '' : 'none';
 
+  // 兩段班時,底部共用備註欄隱藏 (改用每段內的獨立備註)
+  const noteRow = $('swapNoteRow');
+  if(noteRow) noteRow.style.display = checked ? 'none' : '';
+
   // 如果切到兩段班,確保兩個院區下拉已填入選項 (含外援)
   if(checked){
     ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
@@ -5581,6 +5702,7 @@ async function submitSwap(){
 
   let swapWith = [];
   let coverName = '';
+  let splitNotes = null;  // 兩段班時用,個別段的備註
   if(mode === 'swap'){
     const w1 = $('swapWith1').value.trim();
     if(!w1){ toast('請選擇換班員工','warn'); return; }
@@ -5590,21 +5712,24 @@ async function submitSwap(){
     const splitToggle = $('swapSplitToggle');
     const isSplit = splitToggle && splitToggle.checked && _swapCtx.shift === '出勤';
     if(isSplit){
-      // 兩段班:取兩段時段、院區、姓名
+      // 兩段班:取兩段時段、院區、姓名、各自備註
       const p1 = ($('swapSplitPeriod1').value || '').trim();
       const b1 = ($('swapSplitBranch1').value || '').trim();
       const n1 = ($('swapSplitName1').value || '').trim();
+      const note1 = ($('swapSplitNote1').value || '').trim();
       const p2 = ($('swapSplitPeriod2').value || '').trim();
       const b2 = ($('swapSplitBranch2').value || '').trim();
       const n2 = ($('swapSplitName2').value || '').trim();
+      const note2 = ($('swapSplitNote2').value || '').trim();
       if(!p1 || !b1 || !n1){ toast('請完整填寫第一段:時段、代班院區、代班姓名','warn'); return; }
       if(!p2 || !b2 || !n2){ toast('請完整填寫第二段:時段、代班院區、代班姓名','warn'); return; }
       if(p1 === p2){ toast('兩段時段不可相同','warn'); return; }
-      // 把兩段塞進 swapWith (帶 __split 標記),不動後端 schema
+      // 把兩段塞進 swapWith (帶 __split 標記 + 各自的 note),不動後端 schema
       swapWith = [
-        {__split:true, period:p1, branch:b1, name:n1},
-        {__split:true, period:p2, branch:b2, name:n2},
+        {__split:true, period:p1, branch:b1, name:n1, note:note1},
+        {__split:true, period:p2, branch:b2, name:n2, note:note2},
       ];
+      splitNotes = {note1, note2};
       // coverName 也填入「概覽字串」方便 records 列表 / 舊版相容檢視
       coverName = `${p1}:${n1} (${b1}) / ${p2}:${n2} (${b2})`;
     } else {
@@ -5621,6 +5746,22 @@ async function submitSwap(){
     if(!coverName){ toast('請填入代班人員姓名','warn'); return; }
   }
 
+  // 兩段班的 rec.note 串接兩段備註(例:"早:DR16 / 晚:DR47"),方便記錄列表預覽;
+  // 一般情況下沿用底部共用備註欄
+  let recNote;
+  if(splitNotes){
+    const s = $('swapSplitName1').value.trim();
+    const e = $('swapSplitName2').value.trim();
+    const p1 = $('swapSplitPeriod1').value.trim();
+    const p2 = $('swapSplitPeriod2').value.trim();
+    const parts = [];
+    if(splitNotes.note1) parts.push(`${p1}:${splitNotes.note1}`);
+    if(splitNotes.note2) parts.push(`${p2}:${splitNotes.note2}`);
+    recNote = parts.join(' / ');
+  } else {
+    recNote = $('swapNote').value.trim();
+  }
+
   const rec = {
     id: 'S' + Date.now() + Math.floor(Math.random()*100),
     branch: State.currentBranch,
@@ -5632,7 +5773,7 @@ async function submitSwap(){
     mode,
     swapWith,
     coverName,
-    note: $('swapNote').value.trim(),
+    note: recNote,
     createdAt: new Date().toISOString()
   };
 
@@ -6469,18 +6610,39 @@ function renderRecords(){
   const list = $('recordsList');
   const swaps = (State.swaps||[]);
 
-  // ── Summary stats: aggregate leave-type records per (originalName + reason)
-  const leaveStats = {};   // key = "name__reason" → {name, reason, count, branch, position}
-  swaps.forEach(r=>{
-    if(r.mode !== 'leave') return;  // only count assist/leave categories
-    const k = (r.originalName||'-') + '__' + (r.reason||'-');
-    if(!leaveStats[k]) leaveStats[k] = {name:r.originalName, reason:r.reason, count:0, branch:r.branch, position:r.position};
-    leaveStats[k].count += 1;
+  // ─── 1. 填充篩選下拉的選項 (從現有資料動態生成,保留使用者選擇) ───
+  const populateFilter = (selId, allValues) => {
+    const sel = $(selId);
+    if(!sel) return;
+    const cur = sel.value;
+    const uniq = Array.from(new Set(allValues.filter(Boolean))).sort();
+    sel.innerHTML = `<option value="">全部</option>` +
+      uniq.map(v => `<option value="${v}"${v===cur?' selected':''}>${v}</option>`).join('');
+  };
+  populateFilter('rfEmployee', swaps.map(r => r.originalName));
+  populateFilter('rfReason',   swaps.map(r => r.reason));
+  populateFilter('rfBranch',   swaps.map(r => r.branch));
+  populateFilter('rfPosition', swaps.map(r => r.position));
+
+  // ─── 2. 套用篩選條件 ───
+  const fEmp    = ($('rfEmployee') ? $('rfEmployee').value : '').trim();
+  const fReason = ($('rfReason')   ? $('rfReason').value   : '').trim();
+  const fBranch = ($('rfBranch')   ? $('rfBranch').value   : '').trim();
+  const fPos    = ($('rfPosition') ? $('rfPosition').value : '').trim();
+  const filtered = swaps.filter(r => {
+    if(fEmp    && String(r.originalName||'') !== fEmp)    return false;
+    if(fReason && String(r.reason||'')       !== fReason) return false;
+    if(fBranch && String(r.branch||'')       !== fBranch) return false;
+    if(fPos    && String(r.position||'')     !== fPos)    return false;
+    return true;
   });
-  // Also count 私事支援
-  swaps.forEach(r=>{
-    if(r.mode !== 'support') return;
-    const k = (r.originalName||'-') + '__' + (r.reason||'私事支援');
+  const hasFilter = !!(fEmp || fReason || fBranch || fPos);
+
+  // ─── 3. 統計卡 (依篩選後的資料,聚合 leave + support 類別) ───
+  const leaveStats = {};   // key = "name__reason" → {name, reason, count, branch, position}
+  filtered.forEach(r=>{
+    if(r.mode !== 'leave' && r.mode !== 'support') return;
+    const k = (r.originalName||'-') + '__' + (r.reason||'-');
     if(!leaveStats[k]) leaveStats[k] = {name:r.originalName, reason:r.reason, count:0, branch:r.branch, position:r.position};
     leaveStats[k].count += 1;
   });
@@ -6489,7 +6651,7 @@ function renderRecords(){
   const statEntries = Object.values(leaveStats).sort((a,b)=>b.count-a.count);
   if(statEntries.length){
     statsHtml = `<div class="records-stats">
-      <div class="records-stats-title">📊 請假/支援 統計</div>
+      <div class="records-stats-title">📊 請假/支援 統計${hasFilter ? ' <span style="font-size:12px; color:var(--muted); font-weight:400;">(依目前篩選)</span>' : ''}</div>
       <div class="records-stats-grid">
         ${statEntries.map(s=>{
           const isSupport = s.reason === '私事支援';
@@ -6506,16 +6668,22 @@ function renderRecords(){
     </div>`;
   }
 
+  // ─── 4. 列表 (空態處理:沒任何紀錄 vs 篩選結果為空) ───
   if(!swaps.length){
     list.innerHTML = `<div class="empty-state"><div class="ico">📋</div><div class="msg">尚無紀錄</div></div>`;
     return;
   }
+  if(!filtered.length){
+    list.innerHTML = statsHtml + `<div class="empty-state"><div class="ico">🔍</div><div class="msg">目前篩選條件下無紀錄</div><div style="margin-top:10px;"><button class="btn" onclick="resetRecordsFilter()">↺ 重置篩選</button></div></div>`;
+    return;
+  }
+
   let html = statsHtml + `<div class="record-item" style="background:var(--teal-50); font-size:13px; color:var(--muted); letter-spacing:1px; font-weight:600;">
     <div>原因</div><div>院區</div><div>職位</div><div>原本人員</div><div>日期</div><div>班別</div><div>代班/換班對象</div><div>備註</div><div>操作</div>
   </div>`;
   const isAdmin = State.user.role === 'admin';
-  // Sort: pending first, then by createdAt desc (待核准優先)
-  const sorted = swaps.slice().sort((a,b)=>{
+  // 排序:pending 優先,接著依 createdAt desc
+  const sorted = filtered.slice().sort((a,b)=>{
     const ap = isPendingApplication(a) ? 0 : 1;
     const bp = isPendingApplication(b) ? 0 : 1;
     if(ap !== bp) return ap - bp;
@@ -6528,12 +6696,16 @@ function renderRecords(){
     const modeBg = r.mode==='swap' ? '#e8e6df'
                  : r.mode==='support' ? '#fef3c7'
                  : '#fde6e6';
-    // 顯示對象:換班 → 換班員工;兩段班 → 兩段早/晚分列;其他 → coverName
+    // 顯示對象:換班 → 換班員工;兩段班 → 兩段早/晚分列(含每段備註);其他 → coverName
     let target;
     if(r.mode === 'swap'){
       target = (r.swapWith||[]).join(' / ');
     } else if(isSplitSwap(r)){
-      target = r.swapWith.map(c => `${c.period}: ${c.name} (${c.branch})`).join(' ／ ');
+      target = r.swapWith.map(c => {
+        const note = String(c.note || '').trim();
+        const noteHtml = note ? ` <span style="color:var(--muted); font-size:12px;">[${note}]</span>` : '';
+        return `${c.period}: ${c.name} (${c.branch})${noteHtml}`;
+      }).join('<br>');
     } else {
       target = r.coverName || '';
     }
@@ -6549,6 +6721,10 @@ function renderRecords(){
         actionsHtml = `<button class="btn" style="padding:5px 10px; font-size:12px;" onclick="deleteSwap('${r.id}')">刪除</button>`;
       }
     }
+    // 兩段班的備註已在 target 欄分段顯示,獨立備註欄就顯示「— (見左)」
+    const noteCol = isSplitSwap(r)
+      ? `<span style="color:var(--muted); font-size:12px;">(見左欄各段)</span>`
+      : (r.note || '—');
     html += `<div class="record-item${isPending?' pending':''}">
       <div><span class="type-tag" style="background:${modeBg}; color:${modeColor};">${r.reason}${isSplitSwap(r) ? ' · 兩段班' : ''}</span>${pendingTag}</div>
       <div>${r.branch}</div>
@@ -6557,7 +6733,7 @@ function renderRecords(){
       <div>${r.date||'-'}</div>
       <div>${r.shift||'-'}班</div>
       <div><b>${target||'-'}</b></div>
-      <div style="color:var(--muted); font-size:13px;">${r.note||'—'}</div>
+      <div style="color:var(--muted); font-size:13px;">${noteCol}</div>
       <div>${actionsHtml}</div>
     </div>`;
   });
@@ -6580,12 +6756,16 @@ async function loadAllRecords(){
   renderRecords();
 }
 
-/* (Old leave functions removed in v3 - replaced by swap modal system) */
-
-async function loadAllRecords(){
-  await loadAllData();
+// 重置篩選下拉,然後重渲染
+function resetRecordsFilter(){
+  ['rfEmployee','rfReason','rfBranch','rfPosition'].forEach(id => {
+    const sel = $(id);
+    if(sel) sel.value = '';
+  });
   renderRecords();
 }
+
+/* (Old leave functions removed in v3 - replaced by swap modal system) */
 
 /* =====================================================================
    DOWNLOAD A4 (compress entire 8-week period to single A4 portrait)
@@ -6766,12 +6946,16 @@ async function downloadA4(){
               displayHtml = (swap.swapWith && swap.swapWith[0]) || n;
               bg = '#dcd9d0'; fg = '#2a2a2a';
             } else if(isSplit){
-              // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區)
+              // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區 + 該段備註)
               displayHtml = swap.swapWith.map((c, i) => {
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
                 const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
                 const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
-                return `${sep}${periodHtml}${c.name||''}${branchHtml}`;
+                const segNote = String(c.note || '').trim();
+                const segNoteHtml = segNote
+                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.85; margin-top:1px; line-height:1.2;">${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                  : '';
+                return `${sep}${periodHtml}${c.name||''}${branchHtml}${segNoteHtml}`;
               }).join('');
               if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
@@ -6786,15 +6970,14 @@ async function downloadA4(){
             }
             // 備註顯示在 pill 下方
             // 隱私規則同 renderCell:排班表上一律不顯示假別文字(缺人/產檢等)
-            // 要看假別請去「班別異動記錄」分頁
+            // 兩段班的備註已在分段中個別顯示,此處不重複輸出
             const noteText = String(swap.note || '').trim();
             let noteHtml = '';
-            if(noteText){
+            if(noteText && !isSplit){
               const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                                   .replace(/\n/g,'<br>');
               noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
             }
-            // (不再以 swap.reason 作為 leave 模式無備註時的 fallback)
             return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px;">${n}</span>`;
@@ -7053,7 +7236,11 @@ async function downloadA4PartTime(){
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
                 const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
                 const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
-                return `${sep}${periodHtml}${c.name||''}${branchHtml}`;
+                const segNote = String(c.note || '').trim();
+                const segNoteHtml = segNote
+                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.85; margin-top:1px; line-height:1.2;">${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                  : '';
+                return `${sep}${periodHtml}${c.name||''}${branchHtml}${segNoteHtml}`;
               }).join('');
               if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
@@ -7068,9 +7255,10 @@ async function downloadA4PartTime(){
             }
             // 備註顯示在 pill 下方
             // 隱私規則同網頁排班表:不再以 swap.reason 顯示假別文字
+            // 兩段班的備註已在分段中個別顯示,此處不重複
             const noteText = String(swap.note || '').trim();
             let noteHtml = '';
-            if(noteText){
+            if(noteText && !isSplit){
               const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                                   .replace(/\n/g,'<br>');
               noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
