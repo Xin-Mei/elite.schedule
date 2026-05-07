@@ -715,6 +715,25 @@
   }
   .form-grid-3{grid-template-columns:1fr 1fr 1fr;}
 
+  /* 兩段班 — 分段容器 */
+  .split-segment{
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:12px 14px 14px;
+    background:#fbf8f0;
+    margin-bottom:10px;
+  }
+  .split-segment-head{
+    font-family:'Noto Serif TC',serif;
+    color:var(--teal-800);
+    letter-spacing:3px;
+    font-size:14px;
+    font-weight:600;
+    margin-bottom:8px;
+    padding-bottom:6px;
+    border-bottom:1px dashed var(--line);
+  }
+
   /* Settings modal section headers */
   .section-h{
     margin: 28px 0 6px;
@@ -1688,6 +1707,38 @@
     letter-spacing:1px;
     opacity:0.85;
   }
+  /* 備註顯示 — 取代原本的 reason-badge,可顯示在任何模式的 pill 下方 */
+  .name-pill .cell-note{
+    display:block;
+    font-size:10px;
+    font-weight:400;
+    margin-top:3px;
+    line-height:1.3;
+    letter-spacing:0.5px;
+    opacity:0.9;
+    padding-top:2px;
+    border-top:1px dashed currentColor;
+    word-break:break-word;
+    white-space:normal;
+  }
+  /* 兩段班 — 早段 / 晚段 各一段 */
+  .name-pill .split-period{
+    display:inline-block;
+    font-size:10px;
+    font-weight:700;
+    padding:1px 4px;
+    margin-right:3px;
+    border-radius:3px;
+    background:rgba(0,0,0,0.08);
+    letter-spacing:1px;
+  }
+  .name-pill .split-sep{
+    display:block;
+    height:0;
+    margin:3px 0;
+    border-top:1px dashed currentColor;
+    opacity:0.4;
+  }
 
   /* ========== Cell quick-action floating menu ========== */
   .cell-menu{
@@ -2375,20 +2426,84 @@
 
       <!-- Block C: 缺人/各種假別 (mode=leave) -->
       <div id="swapBlockLeave">
-        <div class="form-grid form-grid-2">
-          <div class="form-row">
-            <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
-            <select id="swapLeaveCoverBranch" onchange="syncSwapLeaveCover()">
-              <option value="">— 請選擇 —</option>
-            </select>
+        <!-- 「該日為兩段班」開關 — 僅出勤(12HR) 班別才顯示 -->
+        <div id="swapSplitToggleRow" class="form-row" style="display:none; padding:10px 14px; background:#fef3c7; border:1px solid #e8d28a; border-radius:8px; margin-bottom:12px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+            <input type="checkbox" id="swapSplitToggle" onchange="onSwapSplitToggle()"/>
+            <span>該日為<b>兩段班</b> <span style="font-weight:400; color:var(--muted); font-size:12px;">— 早段、晚段不同代班人員時勾選</span></span>
+          </label>
+        </div>
+
+        <!-- 一般單一代班 (預設) -->
+        <div id="swapLeaveSingleBlock">
+          <div class="form-grid form-grid-2">
+            <div class="form-row">
+              <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+              <select id="swapLeaveCoverBranch" onchange="syncSwapLeaveCover()">
+                <option value="">— 請選擇 —</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+              <input type="text" id="swapLeaveCoverName" placeholder="如:王小美" oninput="syncSwapLeaveCover()"/>
+            </div>
           </div>
-          <div class="form-row">
-            <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
-            <input type="text" id="swapLeaveCoverName" placeholder="如:王小美" oninput="syncSwapLeaveCover()"/>
+          <div style="font-size:13px; color:var(--muted); margin-top:-4px;">
+            送出後班表會顯示為紅底,並顯示代班人姓名與院區
           </div>
         </div>
-        <div style="font-size:13px; color:var(--muted); margin-top:-4px;">
-          送出後班表會顯示為紅底,並顯示代班人姓名與院區
+
+        <!-- 兩段班 (僅 attendance + 勾選兩段班時顯示) -->
+        <div id="swapLeaveSplitBlock" style="display:none;">
+          <div class="split-segment">
+            <div class="split-segment-head">第一段</div>
+            <div class="form-grid form-grid-3">
+              <div class="form-row">
+                <label>時段 <span style="color:#c14a4a;">*</span></label>
+                <select id="swapSplitPeriod1">
+                  <option value="早">早</option>
+                  <option value="午">午</option>
+                  <option value="晚">晚</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>代班院區 <span style="color:#c14a4a;">*</span></label>
+                <select id="swapSplitBranch1">
+                  <option value="">— 請選擇 —</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>代班姓名 <span style="color:#c14a4a;">*</span></label>
+                <input type="text" id="swapSplitName1" placeholder="如:王小美"/>
+              </div>
+            </div>
+          </div>
+          <div class="split-segment">
+            <div class="split-segment-head">第二段</div>
+            <div class="form-grid form-grid-3">
+              <div class="form-row">
+                <label>時段 <span style="color:#c14a4a;">*</span></label>
+                <select id="swapSplitPeriod2">
+                  <option value="早">早</option>
+                  <option value="午">午</option>
+                  <option value="晚" selected>晚</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>代班院區 <span style="color:#c14a4a;">*</span></label>
+                <select id="swapSplitBranch2">
+                  <option value="">— 請選擇 —</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>代班姓名 <span style="color:#c14a4a;">*</span></label>
+                <input type="text" id="swapSplitName2" placeholder="如:張小帆"/>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:13px; color:var(--muted); margin-top:6px;">
+            送出後班表會顯示為紅底,並依序列出兩段代班人員資訊
+          </div>
         </div>
       </div>
 
@@ -2682,6 +2797,10 @@
 const SHEET_ID = '185n5fkfH-D5v_qW8umgBfyNaodBEQIVbuGAG2Ad5Cz4';
 const SHEET_URL_BASE = `https://docs.google.com/spreadsheets/d/${SHEET_ID}`;
 const BRANCHES = ['鶯歌','三樹','桃園','土城','八德','龍潭','大溪','大竹','大湳','平鎮','埔心','觀音'];
+// 代班人員院區下拉選單的額外選項 (院外人員)
+const COVER_BRANCH_EXTRAS = ['薪資外援'];
+// 完整的代班院區選項 (12 院區 + 薪資外援)
+const COVER_BRANCH_OPTIONS = [...BRANCHES, ...COVER_BRANCH_EXTRAS];
 const POSITIONS = ['櫃台','護理師','藥師','藥助','減重櫃台','工讀'];
 const GROUP_LETTERS = ['A','B','C','D'];
 const WEEKDAY_LABELS = ['日','一','二','三','四','五','六'];
@@ -3621,7 +3740,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </div>
   `;
 
-  let html = hoursTableHtml + bulkToolbarHtml + staffPoolHtml + `<table class="schedule"><thead><tr>
+  let html = staffPoolHtml + hoursTableHtml + bulkToolbarHtml + `<table class="schedule"><thead><tr>
     <th class="shift">班</th>
     ${WEEKDAY_LABELS.map(w=>`<th>${w}</th>`).join('')}
   </tr></thead><tbody>`;
@@ -4392,34 +4511,57 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         if(m) return {name:m[1].trim(), branch:m[2].trim()};
         return {name:String(str).trim(), branch:''};
       };
+      // 偵測「該日為兩段班」(出勤 12HR 模式下,前後段不同代班)
+      const splitCovers = isSplitSwap(swap) ? swap.swapWith : null;
       // The cell shows the COVER name (or the swap-target person), with mode coloring
-      let pillContent, modeClass, showReason;
+      let pillContent, modeClass;
       if(swap.mode === 'swap'){
         // 換班:顯示換進來的人,僅顏色標示,不加文字
         pillContent = (swap.swapWith && swap.swapWith[0]) || n;
         modeClass = 'mode-swap';
-        showReason = false;
+      } else if(splitCovers){
+        // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區)
+        pillContent = splitCovers.map((c, i) => {
+          const branchHtml = c.branch ? `<span class="cover-branch">${c.branch}</span>` : '';
+          const sep = i > 0 ? '<span class="split-sep">／</span>' : '';
+          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${branchHtml}`;
+        }).join('');
+        modeClass = (swap.mode === 'support') ? 'mode-support' : 'mode-leave';
       } else if(swap.mode === 'support'){
         // 私事支援:顯示代班人姓名,若有院區資訊則顯示在下方第二行
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
         if(cv.branch) pillContent += `<span class="cover-branch">${cv.branch}</span>`;
         modeClass = 'mode-support';
-        showReason = false;
       } else {
         // 缺人 + 各種假別:紅底 + 代班人姓名
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
         if(cv.branch) pillContent += `<span class="cover-branch">${cv.branch}</span>`;
         modeClass = 'mode-leave';
-        showReason = isAdmin;  // 只有管理員看得到「婚假/產假」等假別文字
+      }
+      // ─── 備註顯示 (取代原本的缺人/假別文字註記) ───────────────
+      // 隱私規則:leave 模式 (假別) 的備註只給管理員看到,避免員工知道誰請哪種假
+      // 換班 / 私事支援 / 兩段班 → 備註所有人都看得到
+      const noteText = String(swap.note || '').trim();
+      let noteHtml = '';
+      if(noteText){
+        const canSeeNote = isAdmin || swap.mode === 'swap' || swap.mode === 'support';
+        if(canSeeNote){
+          // 換行顯示在 pill 下方;HTML escape 以防備註內含特殊字元
+          const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                               .replace(/\n/g,'<br>');
+          noteHtml = `<span class="cell-note">${safe}</span>`;
+        }
+      } else if(swap.mode === 'leave' && isAdmin){
+        // 沒備註 + leave 模式 + admin → 仍顯示假別名稱(向下相容,讓管理員一眼看出是哪種假)
+        noteHtml = `<span class="cell-note">${swap.reason}</span>`;
       }
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
       const tip = isAdmin
-        ? `${swap.reason} · 原 ${n}` + (swap.note?` · ${swap.note}`:'')
+        ? `${swap.reason} · 原 ${n}` + (noteText ? ` · ${noteText}` : '')
         : `代班 · 原 ${n}`;
-      const badge = showReason ? `<span class="reason-badge">${swap.reason}</span>` : '';
-      return `<span class="name-pill ${modeClass}" title="${tip}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${pillContent}${badge}</span>`;
+      return `<span class="name-pill ${modeClass}" title="${tip}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${pillContent}${noteHtml}</span>`;
     }
 
     let cls = 'name-pill '+g;
@@ -4506,6 +4648,19 @@ const SWAP_REASONS = [
 ];
 
 let _swapCtx = null; // {date, shift, name}
+
+// ─── 判斷此 swap 紀錄是否為「兩段班」(出勤 12HR 模式專用) ──────────
+// 兩段班把多筆代班人員資訊塞進 swapWith 陣列裡 (元素為含 __split 標記的物件)
+// 範例:
+//   swapWith: [
+//     { __split:true, period:'早', branch:'鶯歌', name:'小明' },
+//     { __split:true, period:'晚', branch:'土城', name:'小美' }
+//   ]
+// 這樣可以不用動後端 schema (swapWith 本來就是 JSON-serialized array)
+function isSplitSwap(rec){
+  if(!rec || !Array.isArray(rec.swapWith) || !rec.swapWith.length) return false;
+  return rec.swapWith.every(x => x && typeof x === 'object' && x.__split === true);
+}
 
 // 依日期決定每個 group 在當天的員工 (考慮 from~to 區間)
 // 規則:
@@ -4603,7 +4758,7 @@ function openSwapModal(date, shift, name){
   const lbSel = $('swapLeaveCoverBranch');
   if(lbSel){
     lbSel.innerHTML = `<option value="">— 請選擇 —</option>` +
-      BRANCHES.map(b => `<option value="${b}">${b}</option>`).join('');
+      COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
   }
   $('swapLeaveCoverName').value = '';
 
@@ -4635,12 +4790,42 @@ function openSwapModal(date, shift, name){
       document.querySelectorAll('.swap-cover-input').forEach(el=>el.value = existing.coverName || '');
       // For leave mode, parse "Name (Branch)" back into the two fields
       if(existing.mode === 'leave'){
-        const m = String(existing.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
-        if(m){
-          $('swapLeaveCoverName').value = m[1].trim();
-          if(BRANCHES.includes(m[2].trim())) $('swapLeaveCoverBranch').value = m[2].trim();
+        // ─── 偵測既有紀錄是否為「兩段班」並還原 UI ─────────────
+        if(isSplitSwap(existing)){
+          // 確保兩個院區下拉先填好(否則設值會無效)
+          ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
+            const sel = $(id);
+            if(sel){
+              sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+                COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+            }
+          });
+          const splits = existing.swapWith || [];
+          if(splits[0]){
+            $('swapSplitPeriod1').value = splits[0].period || '早';
+            $('swapSplitBranch1').value = splits[0].branch || '';
+            $('swapSplitName1').value   = splits[0].name   || '';
+          }
+          if(splits[1]){
+            $('swapSplitPeriod2').value = splits[1].period || '晚';
+            $('swapSplitBranch2').value = splits[1].branch || '';
+            $('swapSplitName2').value   = splits[1].name   || '';
+          }
+          // 開啟兩段班勾選 (applySwapModeUI 會根據 shift 與勾選狀態決定顯不顯示)
+          const cb = $('swapSplitToggle');
+          if(cb) cb.checked = true;
         } else {
-          $('swapLeaveCoverName').value = existing.coverName || '';
+          // 一般單一代班 — 從 "Name (Branch)" 解回兩格欄位
+          const m = String(existing.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
+          if(m){
+            $('swapLeaveCoverName').value = m[1].trim();
+            if(COVER_BRANCH_OPTIONS.includes(m[2].trim())) $('swapLeaveCoverBranch').value = m[2].trim();
+          } else {
+            $('swapLeaveCoverName').value = existing.coverName || '';
+          }
+          // 確保兩段班勾選為 false
+          const cb = $('swapSplitToggle');
+          if(cb) cb.checked = false;
         }
       }
     }
@@ -4649,10 +4834,16 @@ function openSwapModal(date, shift, name){
     // Reset form for new entry
     $('swapReason').value = '換班';
     $('swapNote').value = '';
+    // Reset 兩段班 fields
+    const cb = $('swapSplitToggle');
+    if(cb) cb.checked = false;
+    ['swapSplitName1','swapSplitName2'].forEach(id => { const el = $(id); if(el) el.value = ''; });
     $('swapRestoreBtn').style.display = 'none';
   }
 
   applySwapModeUI();
+  // 兩段班勾選狀態同步到對應的 UI 區塊顯示
+  onSwapSplitToggle();
   openModal('swapModal');
 }
 
@@ -4706,7 +4897,7 @@ function openApplyModal(ctx){
   $('applyName').value = ctx.name || '';
 
   // Populate cover-branch dropdown
-  const branchOpts = BRANCHES.map(b=>`<option value="${b}">${b}</option>`).join('');
+  const branchOpts = COVER_BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join('');
   $('applyCoverBranch').innerHTML = `<option value="">— 請選擇 —</option>` + branchOpts;
   $('applyCoverBranch').value = '';
   $('applyCoverName').value = '';
@@ -5267,16 +5458,33 @@ async function restoreOriginalSwap(){
     return;
   }
   if(!confirm('確定要取消此換班/支援設定,還原為原排班?')) return;
-  showLoading('還原中…');
-  await api('deleteSwap', {id: _swapCtx.existingId});
-  await loadAllData();
-  hideLoading();
-  toast('已還原為原排班');
+
+  const id = _swapCtx.existingId;
+  const idStr = String(id);
+
+  // 從 State.swaps 中先把這筆紀錄移除 (確保畫面立刻反映)
+  const idx = (State.swaps || []).findIndex(s => String(s.id) === idStr);
+  const removed = idx >= 0 ? State.swaps.splice(idx, 1)[0] : null;
+
+  // 判定:
+  //   ① 紀錄是 STMP 開頭 → 本地暫存,從未進過 sheet → 不需呼叫 API
+  //   ② 紀錄是 S/L 開頭   → 已存在於 sheet → 加入 pendingDeletions,留待批次儲存
+  //   ③ removed 為空      → 可能是更舊的格式 → 仍嘗試一次 deleteSwap
+  const isLocalOnly = idStr.startsWith('STMP');
+  if(!isLocalOnly){
+    State.pendingDeletions = State.pendingDeletions || [];
+    if(!State.pendingDeletions.includes(id)) State.pendingDeletions.push(id);
+  }
+
   closeModal('swapModal');
+
+  // 立即重繪 — 排班表回到原樣,banner 顯示「待儲存」
   renderBranch();
+  if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
   if(document.getElementById('homeRecords') && document.getElementById('homeRecords').style.display !== 'none'){
     renderRecords();
   }
+  toast(isLocalOnly ? '已還原 (本地暫存,未送至 Sheet)' : '已還原 (待儲存)');
 }
 
 function syncSwapCover(srcEl){
@@ -5321,11 +5529,47 @@ function applySwapModeUI(){
   $('swapBlockSwap').style.display     = (mode==='swap')    ? '' : 'none';
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
+
+  // 「該日為兩段班」勾選列 — 僅在 leave 模式 + 出勤(12HR) 班別時顯示
+  const splitToggleRow = $('swapSplitToggleRow');
+  if(splitToggleRow){
+    const isAttendance = (_swapCtx && _swapCtx.shift === '出勤');
+    const showSplit = (mode === 'leave') && isAttendance;
+    splitToggleRow.style.display = showSplit ? '' : 'none';
+    if(!showSplit){
+      // 切走時記得清掉勾選 + 還原成單一代班區塊
+      const cb = $('swapSplitToggle');
+      if(cb) cb.checked = false;
+      onSwapSplitToggle();
+    }
+  }
+
   // Update color hint
   const hint = $('swapColorHint');
   if(mode==='swap'){ hint.textContent='送出後 → 班表顯示為灰底黑字';   hint.className='swap-color-hint h-gray'; }
   else if(mode==='support'){ hint.textContent='送出後 → 班表顯示為黃底黑字'; hint.className='swap-color-hint h-yellow'; }
   else { hint.textContent='送出後 → 班表顯示為紅色系'; hint.className='swap-color-hint h-red'; }
+}
+
+// 切換「該日為兩段班」開關時,顯示對應的代班輸入區塊
+function onSwapSplitToggle(){
+  const cb = $('swapSplitToggle');
+  const checked = cb ? cb.checked : false;
+  const single = $('swapLeaveSingleBlock');
+  const splitBlk = $('swapLeaveSplitBlock');
+  if(single)   single.style.display   = checked ? 'none' : '';
+  if(splitBlk) splitBlk.style.display = checked ? '' : 'none';
+
+  // 如果切到兩段班,確保兩個院區下拉已填入選項 (含薪資外援)
+  if(checked){
+    ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
+      const sel = $(id);
+      if(sel && sel.options.length <= 1){
+        sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+          COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+      }
+    });
+  }
 }
 
 async function submitSwap(){
@@ -5341,12 +5585,35 @@ async function submitSwap(){
     if(!w1){ toast('請選擇換班員工','warn'); return; }
     swapWith = [w1];
   } else if(mode === 'leave'){
-    // 假別/缺人:必填院區 + 姓名
-    const lb = $('swapLeaveCoverBranch').value;
-    const ln = $('swapLeaveCoverName').value.trim();
-    if(!lb){ toast('請選擇代班人員院區','warn'); return; }
-    if(!ln){ toast('請填寫代班人員姓名','warn'); return; }
-    coverName = `${ln} (${lb})`;
+    // 偵測「該日為兩段班」勾選狀態
+    const splitToggle = $('swapSplitToggle');
+    const isSplit = splitToggle && splitToggle.checked && _swapCtx.shift === '出勤';
+    if(isSplit){
+      // 兩段班:取兩段時段、院區、姓名
+      const p1 = ($('swapSplitPeriod1').value || '').trim();
+      const b1 = ($('swapSplitBranch1').value || '').trim();
+      const n1 = ($('swapSplitName1').value || '').trim();
+      const p2 = ($('swapSplitPeriod2').value || '').trim();
+      const b2 = ($('swapSplitBranch2').value || '').trim();
+      const n2 = ($('swapSplitName2').value || '').trim();
+      if(!p1 || !b1 || !n1){ toast('請完整填寫第一段:時段、代班院區、代班姓名','warn'); return; }
+      if(!p2 || !b2 || !n2){ toast('請完整填寫第二段:時段、代班院區、代班姓名','warn'); return; }
+      if(p1 === p2){ toast('兩段時段不可相同','warn'); return; }
+      // 把兩段塞進 swapWith (帶 __split 標記),不動後端 schema
+      swapWith = [
+        {__split:true, period:p1, branch:b1, name:n1},
+        {__split:true, period:p2, branch:b2, name:n2},
+      ];
+      // coverName 也填入「概覽字串」方便 records 列表 / 舊版相容檢視
+      coverName = `${p1}:${n1} (${b1}) / ${p2}:${n2} (${b2})`;
+    } else {
+      // 一般單一代班:必填院區 + 姓名
+      const lb = $('swapLeaveCoverBranch').value;
+      const ln = $('swapLeaveCoverName').value.trim();
+      if(!lb){ toast('請選擇代班人員院區','warn'); return; }
+      if(!ln){ toast('請填寫代班人員姓名','warn'); return; }
+      coverName = `${ln} (${lb})`;
+    }
   } else {
     // 私事支援
     coverName = $('swapCover').value.trim();
@@ -6260,9 +6527,15 @@ function renderRecords(){
     const modeBg = r.mode==='swap' ? '#e8e6df'
                  : r.mode==='support' ? '#fef3c7'
                  : '#fde6e6';
-    const target = r.mode==='swap'
-      ? (r.swapWith||[]).join(' / ')
-      : (r.coverName || '');
+    // 顯示對象:換班 → 換班員工;兩段班 → 兩段早/晚分列;其他 → coverName
+    let target;
+    if(r.mode === 'swap'){
+      target = (r.swapWith||[]).join(' / ');
+    } else if(isSplitSwap(r)){
+      target = r.swapWith.map(c => `${c.period}: ${c.name} (${c.branch})`).join(' ／ ');
+    } else {
+      target = r.coverName || '';
+    }
     const isPending = isPendingApplication(r);
     const pendingTag = isPending ? `<div class="pending-tag" style="margin-top:4px; display:inline-block;">⏳ 待核准</div>` : '';
     let actionsHtml = '';
@@ -6276,7 +6549,7 @@ function renderRecords(){
       }
     }
     html += `<div class="record-item${isPending?' pending':''}">
-      <div><span class="type-tag" style="background:${modeBg}; color:${modeColor};">${r.reason}</span>${pendingTag}</div>
+      <div><span class="type-tag" style="background:${modeBg}; color:${modeColor};">${r.reason}${isSplitSwap(r) ? ' · 兩段班' : ''}</span>${pendingTag}</div>
       <div>${r.branch}</div>
       <div>${r.position}</div>
       <div><b>${r.originalName||'-'}</b></div>
@@ -6487,9 +6760,20 @@ async function downloadA4(){
               return {name:String(str).trim(), branch:''};
             };
             let displayHtml, bg, fg;
+            const isSplit = isSplitSwap(swap);
             if(swap.mode === 'swap'){
               displayHtml = (swap.swapWith && swap.swapWith[0]) || n;
               bg = '#dcd9d0'; fg = '#2a2a2a';
+            } else if(isSplit){
+              // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區)
+              displayHtml = swap.swapWith.map((c, i) => {
+                const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
+                const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
+                const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                return `${sep}${periodHtml}${c.name||''}${branchHtml}`;
+              }).join('');
+              if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
+              else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
@@ -6499,7 +6783,18 @@ async function downloadA4(){
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}</span>`;
+            // 備註顯示在 pill 下方 (取代原本 leave 模式才有的 reason 文字)
+            const noteText = String(swap.note || '').trim();
+            let noteHtml = '';
+            if(noteText){
+              const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                                  .replace(/\n/g,'<br>');
+              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
+            } else if(swap.mode === 'leave' && !isSplit){
+              // 沒備註 + 一般 leave → 補上假別文字方便辨識
+              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85;">${swap.reason}</span>`;
+            }
+            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px;">${n}</span>`;
         }).join(' '):'<span class="name-pill empty" style="font-size:11px;padding:3px 7px;">－</span>'}</td>`;
@@ -6652,8 +6947,12 @@ async function downloadA4PartTime(){
   });
 
   // ─── 構建上方「診助上班時間」表格 HTML ──────────────────
+  // 用 table-layout: fixed + colgroup 鎖定 7 欄等寬,與下方排班表的日期欄對齊
   const hoursTableHtml = `
-    <table style="width:100%; border-collapse:collapse; margin-bottom:14px; font-size:11px;">
+    <table style="width:100%; border-collapse:collapse; margin-bottom:14px; font-size:11px; table-layout:fixed;">
+      <colgroup>
+        ${Array(7).fill('<col style="width:14.2857%;"/>').join('')}
+      </colgroup>
       <thead>
         <tr>
           <th colspan="7" style="text-align:left; padding:8px 14px; background:var(--teal-50); font-family:'Noto Serif TC',serif; font-size:14px; color:var(--teal-900); letter-spacing:2px; border:1px solid #e3dcc6;">
@@ -6661,7 +6960,7 @@ async function downloadA4PartTime(){
           </th>
         </tr>
         <tr>
-          ${weekDayLabels.map(d=>`<th style="padding:6px 4px; background:#f7f1e3; color:var(--teal-800); font-family:'Noto Serif TC',serif; font-size:12px; letter-spacing:2px; font-weight:700; border:1px solid #e3dcc6; width:14.2857%;">週${d}</th>`).join('')}
+          ${weekDayLabels.map(d=>`<th style="padding:6px 4px; background:#f7f1e3; color:var(--teal-800); font-family:'Noto Serif TC',serif; font-size:12px; letter-spacing:2px; font-weight:700; border:1px solid #e3dcc6;">週${d}</th>`).join('')}
         </tr>
       </thead>
       <tbody>
@@ -6679,8 +6978,15 @@ async function downloadA4PartTime(){
     </table>`;
 
   // ─── 構建月曆排班表 HTML ──────────────────
-  let calendarHtml = `<table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr>
-    <th style="width:32px; padding:8px 4px; background:var(--teal-50); color:var(--teal-800); font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; letter-spacing:2px; border:1px solid #e3dcc6;">班</th>
+  // 用 table-layout: fixed + colgroup 鎖定欄寬,確保 7 個日期欄等寬
+  // (避免某些日期格內容多寡造成欄寬參差不齊)
+  let calendarHtml = `<table style="width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed;">
+    <colgroup>
+      <col style="width:36px;"/>
+      ${Array(7).fill('<col style="width:14.2857%;"/>').join('')}
+    </colgroup>
+    <thead><tr>
+    <th style="padding:8px 4px; background:var(--teal-50); color:var(--teal-800); font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; letter-spacing:2px; border:1px solid #e3dcc6;">班</th>
     ${WEEKDAY_LABELS.map(w=>`<th style="padding:8px 4px; background:var(--teal-50); color:var(--teal-800); font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; letter-spacing:2px; border:1px solid #e3dcc6;">${w}</th>`).join('')}
   </tr></thead><tbody>`;
 
@@ -6736,9 +7042,20 @@ async function downloadA4PartTime(){
           };
           if(swap){
             let displayHtml, bg, fg;
+            const isSplit = isSplitSwap(swap);
             if(swap.mode === 'swap'){
               displayHtml = (swap.swapWith && swap.swapWith[0]) || n;
               bg = '#dcd9d0'; fg = '#2a2a2a';
+            } else if(isSplit){
+              // 兩段班 (理論上工讀不會出現,但保留通用渲染避免異常顯示)
+              displayHtml = swap.swapWith.map((c, i) => {
+                const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
+                const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
+                const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                return `${sep}${periodHtml}${c.name||''}${branchHtml}`;
+              }).join('');
+              if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
+              else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
@@ -6748,7 +7065,17 @@ async function downloadA4PartTime(){
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}</span>`;
+            // 備註顯示在 pill 下方,取代原本 leave 才有的 reason 文字
+            const noteText = String(swap.note || '').trim();
+            let noteHtml = '';
+            if(noteText){
+              const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                                  .replace(/\n/g,'<br>');
+              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
+            } else if(swap.mode === 'leave' && !isSplit){
+              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85;">${swap.reason}</span>`;
+            }
+            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           // 一般人員(工讀沒有 ABCD 分組,使用通用青綠色 pill)
           return `<span style="display:inline-block; background:#e7eff5; color:#345d7a; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${n}</span>`;
@@ -6767,38 +7094,8 @@ async function downloadA4PartTime(){
   }
   calendarHtml += `</tbody></table>`;
 
-  // 統計每位工讀人員本月總出勤格數 (含換班後實際上班的格數)
-  const ptcStaff = (setting.employees || []).map(e => e.name).filter(Boolean);
-  const workCount = {};
-  ptcStaff.forEach(n => { workCount[n] = 0; });
-  // 遍歷月內所有日期,計算每人實際在該日的工作格數
-  for(let day=1; day<=daysInMonth; day++){
-    const ds = `${yr}-${pad(mo)}-${pad(day)}`;
-    const cell = monthSched.shifts[ds] || {};
-    SHIFT_DEFS.forEach(sr => {
-      const names = (cell[sr.key] || []).filter(n=>n);
-      names.forEach(n => {
-        const swap = swapMap[ds+'_'+sr.label+'_'+n];
-        if(swap){
-          // 該員工被換掉/請假 → 不算他的工作格
-          // 換班的對象(swap.swapWith[0])此處不加,因為他可能在別格中已被算到
-          return;
-        }
-        if(workCount[n] !== undefined) workCount[n]++;
-      });
-    });
-  }
-  const summaryCardsHtml = ptcStaff.length
-    ? ptcStaff.map(n => `
-        <div style="flex:1; min-width:120px; background:#e7eff5; padding:10px 14px; border-radius:10px; border:1px solid rgba(0,0,0,0.05);">
-          <div style="font-size:10px; letter-spacing:2px; color:var(--muted); margin-bottom:2px;">工讀</div>
-          <div style="display:flex; align-items:baseline; gap:6px;">
-            <span style="font-family:'Noto Serif TC',serif; font-size:14px; font-weight:600; color:var(--teal-900);">${n}</span>
-            <span style="font-family:'Noto Sans TC',sans-serif; font-size:22px; font-weight:700; color:#345d7a;">${workCount[n] || 0}</span>
-            <span style="font-size:11px; color:var(--muted);">格</span>
-          </div>
-        </div>`).join('')
-    : '';
+  // 註:工讀 A4 不顯示「人員上班格數字卡」(依使用者要求);若日後想恢復,
+  // 可參考 git 歷史中此處的 summaryCardsHtml 邏輯。
 
   // ─── 組裝完整 A4 頁面 ──────────────────
   // 從 header 取出實際 logo 圖檔 (避免重複 base64);若取不到就用占位符
@@ -6821,10 +7118,6 @@ async function downloadA4PartTime(){
     <div style="font-family:'Noto Serif TC',serif; color:var(--teal-900); font-size:20px; font-weight:700; letter-spacing:3px; margin-bottom:14px; text-align:center;">
       ${tw(yr)}年 ${mo} 月　${State.currentBranch}　工讀　排班表
     </div>
-
-    ${summaryCardsHtml ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
-      ${summaryCardsHtml}
-    </div>` : ''}
 
     ${hoursTableHtml}
 
