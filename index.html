@@ -1941,14 +1941,19 @@
     border:1px solid rgba(31,138,134,0.2);
   }
   .role-badge.admin{background:#fff3da; color:#9a6a1f; border-color:#e8c97a;}
+  .role-badge.employee{background:var(--teal-50); color:var(--teal-800); border-color:rgba(31,138,134,0.25);}
   .role-badge .who{font-weight:600;}
+  .role-badge .title{opacity:0.85;}
 
-  /* Hide admin-only buttons when role!=admin */
+  /* Hide admin-only elements unless role=admin */
   body[data-role="staff"] .admin-only,
+  body[data-role="employee"] .admin-only,
   body[data-role="guest"] .admin-only{display:none !important;}
-  body[data-role="admin"] .guest-only{display:none !important;}
-  /* Hide guest-only buttons when role==admin */
-  body[data-role="admin"] .guest-only{display:none !important;}
+  /* Hide guest-only buttons when logged in (admin or employee) */
+  body[data-role="admin"] .guest-only,
+  body[data-role="employee"] .guest-only{display:none !important;}
+  /* Hide employee-only elements unless role=employee */
+  body:not([data-role="employee"]) .employee-only{display:none !important;}
 
   @media (max-width: 800px){
     .header-inner{padding:12px 16px;}
@@ -1965,25 +1970,25 @@
 </head>
 <body>
 
-<!-- ========== Employee Login Gate (entry to system) ========== -->
+<!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
   <div class="modal" style="max-width:440px;">
     <div class="modal-head" style="border-bottom:none; padding-bottom:0;">
       <h3 style="display:flex; align-items:center; gap:10px;">
-        <span style="font-size:22px;">👤</span> 員工登入
+        <span style="font-size:22px;">👤</span> 登入排班系統
       </h3>
     </div>
     <div class="modal-body">
       <p style="color:var(--muted); font-size:13px; line-height:1.7; margin: 0 0 18px;">
-        進入排班系統前,請輸入您的員工編號與密碼以驗證身分。<br>
-        僅在職員工可查看班表。
+        請輸入您的<b>員工編號</b>與<b>密碼</b>登入。<br>
+        系統會依帳號自動辨識身分(員工 / 管理員)。
       </p>
 
       <div class="login-error" id="employeeLoginError"></div>
 
       <div class="form-row">
-        <label>員工編號</label>
-        <input type="text" id="empLoginId" placeholder="請輸入員工編號" autocomplete="username"/>
+        <label>員工編號 / 帳號</label>
+        <input type="text" id="empLoginId" placeholder="請輸入員工編號或管理員帳號" autocomplete="username"/>
       </div>
       <div class="form-row">
         <label>密碼</label>
@@ -2065,20 +2070,25 @@
       </div>
     </div>
     <div class="header-right">
-      <!-- Visible only when logged in as admin -->
-      <div class="role-badge admin admin-only" id="roleBadge">
+      <!-- Role badge: shown for admin (gold) and employee (teal); hidden for guest -->
+      <div class="role-badge admin admin-only" id="roleBadgeAdmin">
         <span class="who" id="userName">—</span>
         <span style="opacity:0.6;">·</span>
         <span id="userRole">管理員</span>
+      </div>
+      <div class="role-badge employee employee-only" id="roleBadgeEmployee">
+        <span class="who" id="empName">—</span>
+        <span style="opacity:0.6;">·</span>
+        <span class="title" id="empTitle">—</span>
       </div>
       <div class="header-pill" title="連線狀態">
         <span class="dot"></span>
         <span id="connStatus">同步中</span>
       </div>
       <button class="btn subtle admin-only" onclick="openSetup()" title="設定 Google Sheet 連線">🔗 Sheet 連線</button>
-      <!-- Login button shows when NOT admin; logout shows when admin -->
-      <button class="btn primary guest-only" onclick="openAdminLogin()" title="管理員登入">🔐 管理員登入</button>
+      <!-- Logout shows when admin or employee -->
       <button class="btn subtle admin-only" onclick="doLogout()" title="登出">↩ 登出</button>
+      <button class="btn subtle employee-only" onclick="doLogout()" title="登出">↩ 登出</button>
     </div>
   </div>
 </header>
@@ -2986,7 +2996,10 @@ function apiOffline(action, body){
   // Initialize default admin account if accounts table is empty
   let accounts = JSON.parse(localStorage.getItem('elite_accounts')||'null');
   if(!accounts){
-    accounts = [{account:'admin', password:'admin', name:'系統管理員', role:'admin'}];
+    accounts = [
+      {account:'meiiibaiii', password:'meiiibaiii000', name:'系統管理員', role:'admin'},
+      {account:'admin',      password:'admin',         name:'系統管理員', role:'admin'}
+    ];
     localStorage.setItem('elite_accounts', JSON.stringify(accounts));
   }
 
@@ -2994,6 +3007,16 @@ function apiOffline(action, body){
     const u = accounts.find(a=>a.account===body.account && String(a.password)===String(body.password));
     if(!u) return {ok:false, error:'帳號或密碼錯誤'};
     return {ok:true, user:{account:u.account, name:u.name, role:u.role}};
+  }
+  // Offline fallback for unified login: only admin path works (no employee DB available offline)
+  if(action==='verifyEmployee'){
+    const id = String(body.employeeId||'').trim();
+    const pwd = String(body.password||'').trim();
+    const u = accounts.find(a=>String(a.account).trim()===id && String(a.password).trim()===pwd);
+    if(u && u.role === 'admin'){
+      return {ok:true, user:{account:u.account, name:u.name, role:'admin'}};
+    }
+    return {ok:false, error:'離線模式僅支援管理員登入,員工驗證需連線到 Apps Script'};
   }
   if(action==='all'){
     return {ok:true, data:{
@@ -6584,33 +6607,29 @@ async function saveSetup(){
 }
 
 /* =====================================================================
-   INIT
+   AUTHENTICATION (unified login gate — auto-detects admin vs employee)
    ===================================================================== */
-/* =====================================================================
-   AUTHENTICATION (admin login on demand; guest by default)
-   ===================================================================== */
+
+// Apply CSS data-role + populate role badges based on State.user.role
 function applyRole(){
   const role = (State.user && State.user.role) || 'guest';
   document.body.dataset.role = role;
   document.body.classList.toggle('role-admin', role === 'admin');
-  document.body.classList.toggle('role-guest', role !== 'admin');
-  if(role==='admin'){
-    $('userName').textContent = State.user.name || State.user.account || '管理員';
-    $('userRole').textContent = '管理員';
+  document.body.classList.toggle('role-employee', role === 'employee');
+  document.body.classList.toggle('role-guest', role === 'guest');
+
+  if(role === 'admin'){
+    if($('userName')) $('userName').textContent = State.user.name || State.user.account || '管理員';
+    if($('userRole')) $('userRole').textContent = '管理員';
+  } else if(role === 'employee'){
+    if($('empName'))  $('empName').textContent  = State.user.name  || State.user.employeeId || '員工';
+    if($('empTitle')) $('empTitle').textContent = State.user.jobTitle || '員工';
   }
 }
 
-function openAdminLogin(){
-  $('adminAccount').value = '';
-  $('adminPwd').value = '';
-  $('adminLoginError').classList.remove('show');
-  openModal('adminLoginModal');
-  setTimeout(()=>$('adminAccount').focus(), 150);
-}
-
-// ─── Employee Gate Login (entry verification) ──────────────────────
+// ─── Unified Login Gate (admin or employee in one form) ────────────
 async function doEmployeeLogin(){
-  const id = $('empLoginId').value.trim();
+  const id  = $('empLoginId').value.trim();
   const pwd = $('empLoginPwd').value;
   const errBox = $('employeeLoginError');
   errBox.classList.remove('show');
@@ -6631,18 +6650,48 @@ async function doEmployeeLogin(){
     return;
   }
 
-  // Save in sessionStorage so it persists in this tab but not across browser sessions
-  try {
-    sessionStorage.setItem('elite_emp', JSON.stringify({
-      employeeId: res.user.employeeId,
-      name: res.user.name,
-      verifiedAt: Date.now()
-    }));
-  } catch(_){}
+  // Branch on role returned by backend
+  const u = res.user || {};
+  if(u.role === 'admin'){
+    // Admin login path — persistent in localStorage
+    State.user = {
+      account: u.account || u.employeeId || id,
+      name: u.name || '系統管理員',
+      role: 'admin'
+    };
+    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    // Clear any prior employee session (they're using admin now)
+    sessionStorage.removeItem('elite_emp');
+  } else {
+    // Employee login path — sessionStorage only (must re-login next browser session)
+    State.user = {
+      employeeId: u.employeeId || id,
+      name: u.name || id,
+      jobTitle: u.jobTitle || '',
+      role: 'employee'
+    };
+    try {
+      sessionStorage.setItem('elite_emp', JSON.stringify({
+        employeeId: State.user.employeeId,
+        name: State.user.name,
+        jobTitle: State.user.jobTitle,
+        verifiedAt: Date.now()
+      }));
+    } catch(_){}
+    // Clear any prior admin session (they're using employee now)
+    localStorage.removeItem('elite_user');
+  }
 
-  // Hide the gate
+  applyRole();
   closeEmployeeGate();
-  toast(`歡迎,${res.user.name}`);
+  const greeting = State.user.role === 'admin' ? '管理員' : (State.user.jobTitle || '同仁');
+  toast(`歡迎,${State.user.name} (${greeting})`);
+
+  // Re-render current view so role-gated controls update correctly
+  if(State.currentBranch) renderBranch();
+  const homeRecEl = document.getElementById('homeRecords');
+  if(homeRecEl && homeRecEl.style.display !== 'none') renderRecords();
+  if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
 }
 
 function closeEmployeeGate(){
@@ -6650,68 +6699,118 @@ function closeEmployeeGate(){
   if(gate) gate.classList.remove('show');
 }
 
-function isEmployeeVerified(){
+function openEmployeeGate(){
+  const gate = $('employeeLoginGate');
+  if(gate) gate.classList.add('show');
+  // Reset form
+  if($('empLoginId'))  $('empLoginId').value  = '';
+  if($('empLoginPwd')) $('empLoginPwd').value = '';
+  if($('employeeLoginError')) $('employeeLoginError').classList.remove('show');
+  setTimeout(() => {
+    const idInput = document.getElementById('empLoginId');
+    if(idInput) idInput.focus();
+  }, 100);
+}
+
+// Check if a session is still valid (admin in localStorage OR employee in sessionStorage)
+function restoreSession(){
+  // 1) Try admin session (persistent across browser sessions)
   try {
-    const saved = JSON.parse(sessionStorage.getItem('elite_emp') || 'null');
-    if(!saved || !saved.employeeId) return false;
-    return true;
-  } catch(_){
-    return false;
-  }
+    const savedAdmin = JSON.parse(localStorage.getItem('elite_user') || 'null');
+    if(savedAdmin && savedAdmin.role === 'admin' && savedAdmin.account){
+      State.user = savedAdmin;
+      return true;
+    }
+  } catch(_){}
+
+  // 2) Try employee session (this-browser-tab only)
+  try {
+    const savedEmp = JSON.parse(sessionStorage.getItem('elite_emp') || 'null');
+    if(savedEmp && savedEmp.employeeId){
+      State.user = {
+        employeeId: savedEmp.employeeId,
+        name: savedEmp.name,
+        jobTitle: savedEmp.jobTitle || '',
+        role: 'employee'
+      };
+      return true;
+    }
+  } catch(_){}
+
+  // No valid session — guest
+  State.user = {account:'', name:'', role:'guest'};
+  return false;
+}
+
+// ─── Legacy: Admin-only login modal (kept for back-compat, not in main flow) ───
+function openAdminLogin(){
+  // Now redirects to the unified login gate
+  openEmployeeGate();
 }
 
 async function doAdminLogin(){
-  const account = $('adminAccount').value.trim();
-  const pwd = $('adminPwd').value;
+  // Legacy: shouldn't be triggered in normal flow, but keep functional
+  // by routing to the unified path. Read from old #adminAccount/#adminPwd
+  // if they exist; else, fall through.
+  const acctEl = $('adminAccount'), pwdEl = $('adminPwd');
+  if(!acctEl || !pwdEl) return;
+  const account = acctEl.value.trim();
+  const pwd = pwdEl.value;
   const errBox = $('adminLoginError');
-  errBox.classList.remove('show');
+  if(errBox) errBox.classList.remove('show');
 
   if(!account || !pwd){
-    errBox.textContent = '請輸入帳號與密碼';
-    errBox.classList.add('show');
+    if(errBox){ errBox.textContent = '請輸入帳號與密碼'; errBox.classList.add('show'); }
     return;
   }
 
+  // Reuse the unified verifyEmployee endpoint
   showLoading('驗證中…');
-  const res = await api('login', {account, password: pwd});
+  const res = await api('verifyEmployee', {employeeId: account, password: pwd});
   hideLoading();
-
-  if(!res.ok){
-    errBox.textContent = res.error || '帳號或密碼錯誤';
-    errBox.classList.add('show');
+  if(!res.ok || !res.user || res.user.role !== 'admin'){
+    if(errBox){
+      errBox.textContent = (res.error || '帳號或密碼錯誤') ;
+      errBox.classList.add('show');
+    }
     return;
   }
-  if(res.user.role !== 'admin'){
-    errBox.textContent = '此帳號非管理員,無法登入後台';
-    errBox.classList.add('show');
-    return;
-  }
-
-  State.user = {account: res.user.account, name: res.user.name, role: 'admin'};
+  State.user = {account: res.user.account || account, name: res.user.name, role: 'admin'};
   localStorage.setItem('elite_user', JSON.stringify(State.user));
+  sessionStorage.removeItem('elite_emp');
   applyRole();
   closeModal('adminLoginModal');
   toast(`歡迎,${State.user.name||State.user.account}`);
-  // Re-render current view so admin-only controls appear correctly
   if(State.currentBranch) renderBranch();
   if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
   if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
 }
 
 function doLogout(){
-  if(!confirm('確定要登出管理員身分?')) return;
-  State.user = {account:'', name:'', role:'guest'};
+  const role = (State.user && State.user.role) || 'guest';
+  const label = role === 'admin' ? '管理員' : '員工';
+  if(!confirm(`確定要登出${label}身分?`)) return;
+
+  // Clear both stores so the next visit definitely shows the gate
   localStorage.removeItem('elite_user');
+  sessionStorage.removeItem('elite_emp');
+  State.user = {account:'', name:'', role:'guest'};
   applyRole();
   toast('已登出');
+
+  // Re-show login gate (since the gate is the only entry point)
+  openEmployeeGate();
+
+  // Re-render so admin-only controls vanish
   if(State.currentBranch) renderBranch();
   if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
   if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
 }
 
-// Allow pressing Enter in admin login modal
+// Allow pressing Enter in admin login modal (kept for back-compat)
 document.addEventListener('keydown', (e)=>{
-  if(e.key==='Enter' && $('adminLoginModal').classList.contains('show')){
+  const adminModal = $('adminLoginModal');
+  if(e.key==='Enter' && adminModal && adminModal.classList.contains('show')){
     doAdminLogin();
   }
 });
@@ -6720,11 +6819,14 @@ document.addEventListener('keydown', (e)=>{
    INIT
    ===================================================================== */
 async function init(){
-  // Employee verification gate: if already verified in this session, hide the gate
-  if(isEmployeeVerified()){
+  // Restore prior session (admin from localStorage or employee from sessionStorage)
+  const restored = restoreSession();
+
+  if(restored){
+    // Already logged in this session — skip the gate
     closeEmployeeGate();
   } else {
-    // Gate is shown by default — focus the input
+    // Show the gate and focus the input
     setTimeout(() => {
       const idInput = document.getElementById('empLoginId');
       if(idInput) idInput.focus();
@@ -6732,8 +6834,6 @@ async function init(){
   }
 
   renderBranchGrid();
-  // Default to guest unless previously stored admin session
-  if(!State.user || !State.user.role) State.user = {account:'', name:'', role:'guest'};
   applyRole();
   await loadAllData();
   // Try to restore the previous view from URL hash; if not present, go home
