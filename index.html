@@ -2798,8 +2798,8 @@ const SHEET_ID = '185n5fkfH-D5v_qW8umgBfyNaodBEQIVbuGAG2Ad5Cz4';
 const SHEET_URL_BASE = `https://docs.google.com/spreadsheets/d/${SHEET_ID}`;
 const BRANCHES = ['鶯歌','三樹','桃園','土城','八德','龍潭','大溪','大竹','大湳','平鎮','埔心','觀音'];
 // 代班人員院區下拉選單的額外選項 (院外人員)
-const COVER_BRANCH_EXTRAS = ['薪資外援'];
-// 完整的代班院區選項 (12 院區 + 薪資外援)
+const COVER_BRANCH_EXTRAS = ['外援'];
+// 完整的代班院區選項 (12 院區 + 外援)
 const COVER_BRANCH_OPTIONS = [...BRANCHES, ...COVER_BRANCH_EXTRAS];
 const POSITIONS = ['櫃台','護理師','藥師','藥助','減重櫃台','工讀'];
 const GROUP_LETTERS = ['A','B','C','D'];
@@ -4541,8 +4541,11 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         modeClass = 'mode-leave';
       }
       // ─── 備註顯示 (取代原本的缺人/假別文字註記) ───────────────
-      // 隱私規則:leave 模式 (假別) 的備註只給管理員看到,避免員工知道誰請哪種假
-      // 換班 / 私事支援 / 兩段班 → 備註所有人都看得到
+      // 隱私規則:
+      //   • leave 模式 (請假) 的備註只給管理員看到,員工看不到
+      //   • 換班 / 私事支援 / 兩段班 → 備註所有人都看得到
+      //   • 不論是否管理員,排班表 cell 上「皆不顯示假別文字」(如缺人/產檢等),
+      //     要看假別請至「班別異動記錄」分頁,或透過 hover tooltip (僅管理員)
       const noteText = String(swap.note || '').trim();
       let noteHtml = '';
       if(noteText){
@@ -4553,10 +4556,8 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
                                .replace(/\n/g,'<br>');
           noteHtml = `<span class="cell-note">${safe}</span>`;
         }
-      } else if(swap.mode === 'leave' && isAdmin){
-        // 沒備註 + leave 模式 + admin → 仍顯示假別名稱(向下相容,讓管理員一眼看出是哪種假)
-        noteHtml = `<span class="cell-note">${swap.reason}</span>`;
       }
+      // (不再以 swap.reason 作為 fallback 顯示假別文字 — 排班表上一律不顯示假別)
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
       const tip = isAdmin
         ? `${swap.reason} · 原 ${n}` + (noteText ? ` · ${noteText}` : '')
@@ -5560,7 +5561,7 @@ function onSwapSplitToggle(){
   if(single)   single.style.display   = checked ? 'none' : '';
   if(splitBlk) splitBlk.style.display = checked ? '' : 'none';
 
-  // 如果切到兩段班,確保兩個院區下拉已填入選項 (含薪資外援)
+  // 如果切到兩段班,確保兩個院區下拉已填入選項 (含外援)
   if(checked){
     ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
       const sel = $(id);
@@ -6783,17 +6784,17 @@ async function downloadA4(){
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            // 備註顯示在 pill 下方 (取代原本 leave 模式才有的 reason 文字)
+            // 備註顯示在 pill 下方
+            // 隱私規則同 renderCell:排班表上一律不顯示假別文字(缺人/產檢等)
+            // 要看假別請去「班別異動記錄」分頁
             const noteText = String(swap.note || '').trim();
             let noteHtml = '';
             if(noteText){
               const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                                   .replace(/\n/g,'<br>');
               noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
-            } else if(swap.mode === 'leave' && !isSplit){
-              // 沒備註 + 一般 leave → 補上假別文字方便辨識
-              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85;">${swap.reason}</span>`;
             }
+            // (不再以 swap.reason 作為 leave 模式無備註時的 fallback)
             return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px;">${n}</span>`;
@@ -7065,15 +7066,14 @@ async function downloadA4PartTime(){
               displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            // 備註顯示在 pill 下方,取代原本 leave 才有的 reason 文字
+            // 備註顯示在 pill 下方
+            // 隱私規則同網頁排班表:不再以 swap.reason 顯示假別文字
             const noteText = String(swap.note || '').trim();
             let noteHtml = '';
             if(noteText){
               const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                                   .replace(/\n/g,'<br>');
               noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
-            } else if(swap.mode === 'leave' && !isSplit){
-              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85;">${swap.reason}</span>`;
             }
             return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
