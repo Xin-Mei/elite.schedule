@@ -1965,6 +1965,37 @@
 </head>
 <body>
 
+<!-- ========== Employee Login Gate (entry to system) ========== -->
+<div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-head" style="border-bottom:none; padding-bottom:0;">
+      <h3 style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:22px;">👤</span> 員工登入
+      </h3>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--muted); font-size:13px; line-height:1.7; margin: 0 0 18px;">
+        進入排班系統前,請輸入您的員工編號與密碼以驗證身分。<br>
+        僅在職員工可查看班表。
+      </p>
+
+      <div class="login-error" id="employeeLoginError"></div>
+
+      <div class="form-row">
+        <label>員工編號</label>
+        <input type="text" id="empLoginId" placeholder="請輸入員工編號" autocomplete="username"/>
+      </div>
+      <div class="form-row">
+        <label>密碼</label>
+        <input type="password" id="empLoginPwd" placeholder="請輸入密碼" autocomplete="current-password" onkeydown="if(event.key==='Enter') doEmployeeLogin()"/>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" onclick="doEmployeeLogin()" style="width:100%;">登　入</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== Admin login modal (only triggered when accessing admin features) ========== -->
 <div class="modal-back" id="adminLoginModal">
   <div class="modal" style="max-width:440px;">
@@ -2155,7 +2186,8 @@
 
       <div class="section-h">員工名單與分組</div>
       <div class="section-desc">
-        分組決定休假日歸屬 (A/B/C/D)。同一組的員工互為輪班搭檔。
+        分組決定休假日歸屬 (A/B/C/D)。同一組的員工互為輪班搭檔。<br>
+        💡 <b>區間設定</b>:若同一組有交接 (例如:A組原為「琳榕」,於 6/1 起改為「小美」),請新增兩筆 A 組,分別填入「生效起算日」即可。留空 = 一直生效。
       </div>
       <div id="employeeList"></div>
       <button class="btn" onclick="addEmployee()">＋ 新增員工</button>
@@ -4079,19 +4111,27 @@ function renderSummary(setting, period){
   let totalWorkDelta = 0;
 
   orderedGroups.forEach(g=>{
-    const emp = setting.employees.find(e=>e.group===g) || {group:g, name:''};
+    // 字卡標題顯示「期末日」當下該組的有效員工 (若期間內換人,顯示最新者)
+    const periodEndStr = fmt(addDays(startD, totalDays-1));
+    const effectiveEmps = getEffectiveEmployees(setting.employees, periodEndStr);
+    const emp = effectiveEmps.find(e => e.group === g)
+                || setting.employees.find(e=>e.group===g)
+                || {group:g, name:''};
+    // 計算 baseWork:每天用「該日有效的此組員工」計入,支援區間切換
     let baseWork = 0;
-    if(emp.name){
-      for(let i=0;i<totalDays;i++){
-        const dt = fmt(addDays(startD,i));
-        const cell = (sched.shifts||{})[dt];
-        if(!cell) continue;
-        // Count cell appearances (cell-count not day-count) — matches validateSwapWorkHours
-        if((cell.morning||[]).includes(emp.name)) baseWork++;
-        if((cell.noon||[]).includes(emp.name)) baseWork++;
-        if((cell.evening||[]).includes(emp.name)) baseWork++;
-        if((cell.attendance||[]).includes(emp.name)) baseWork++;
-      }
+    for(let i=0;i<totalDays;i++){
+      const ds = fmt(addDays(startD,i));
+      const cell = (sched.shifts||{})[ds];
+      if(!cell) continue;
+      // 找該日該組的有效員工
+      const dayEmps = getEffectiveEmployees(setting.employees, ds);
+      const dayEmp = dayEmps.find(e => e.group === g);
+      if(!dayEmp || !dayEmp.name) continue;
+      const n = dayEmp.name;
+      if((cell.morning||[]).includes(n)) baseWork++;
+      if((cell.noon||[]).includes(n)) baseWork++;
+      if((cell.evening||[]).includes(n)) baseWork++;
+      if((cell.attendance||[]).includes(n)) baseWork++;
     }
     const adj = (emp.name ? offAdjustments[emp.name] : null) || {leaveDays:0, swapNetWorkDelta:0};
 
@@ -4234,8 +4274,17 @@ function renderScheduleTable(setting, period){
   const startD = parseDate(period.startDate);
   const startWeek = getISOWeekOfYear(startD);
   const sched = getScheduleForPeriod(period);
+  // Build groupOf as a fallback (all employees union) for tooltip/general use
   const groupOf = {};
   setting.employees.forEach(e=>{ if(e.name) groupOf[e.name]=e.group; });
+  // Per-date groupOf cache for cell rendering (考慮員工區間設定)
+  const groupOfByDate = {}; // 'YYYY-MM-DD' → {name: group}
+  function groupOfFor(dateStr){
+    if(!groupOfByDate[dateStr]){
+      groupOfByDate[dateStr] = getGroupOfMap(setting.employees, dateStr);
+    }
+    return groupOfByDate[dateStr];
+  }
 
   const hasNoon = (setting.rules.noonCount || 0) > 0;
   const hasAttendance = (setting.rules.attendanceCount || 0) > 0;
@@ -4291,7 +4340,7 @@ function renderScheduleTable(setting, period){
         const dt = addDays(startD, w*7+d);
         const ds = fmt(dt);
         const cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
-        html += `<td>${renderCell(cell, ds, sr.label, groupOf, swapMap)}</td>`;
+        html += `<td>${renderCell(cell, ds, sr.label, groupOfFor(ds), swapMap)}</td>`;
       }
       html += `</tr>`;
     });
@@ -4431,6 +4480,36 @@ const SWAP_REASONS = [
 ];
 
 let _swapCtx = null; // {date, shift, name}
+
+// 依日期決定每個 group 在當天的員工 (考慮 from 起算日)
+// 多筆同 group → 取「from <= date 且 from 最大」者 (沒填 from 視為從很早就生效)
+// 回傳:已過濾的 employees array,每個 group 只剩當天有效的那筆
+function getEffectiveEmployees(employees, dateStr){
+  if(!Array.isArray(employees)) return [];
+  if(!dateStr) return employees.slice();
+  const groupMap = {}; // group → best match
+  employees.forEach(e => {
+    if(!e || !e.group) return;
+    const from = e.from || '';
+    // Skip if from > dateStr (not yet effective)
+    if(from && from > dateStr) return;
+    const cur = groupMap[e.group];
+    if(!cur || (from > (cur.from || ''))){
+      groupMap[e.group] = e;
+    }
+  });
+  return Object.values(groupMap);
+}
+
+// 依日期建立 name → group 對應 (考慮區間)
+// 同一個名字若在不同日期屬於不同 group,以該日期為準
+function getGroupOfMap(employees, dateStr){
+  const map = {};
+  getEffectiveEmployees(employees, dateStr).forEach(e => {
+    if(e.name) map[e.name] = e.group;
+  });
+  return map;
+}
 
 // True if a record is an employee application that has NOT been approved yet
 function isPendingApplication(r){
@@ -5729,7 +5808,8 @@ function renderEmployeeList(employees){
       <select data-idx="${idx}" data-field="group">
         ${GROUP_LETTERS.map(g=>`<option value="${g}" ${g===e.group?'selected':''}>${g} 組</option>`).join('')}
       </select>
-      <button class="icon-btn" onclick="removeEmployee(${idx})">×</button>
+      <input type="date" data-idx="${idx}" data-field="from" value="${e.from||''}" title="生效起算日 (留空 = 一直生效;若同 group 有多筆,請依時間順序填寫)" style="width:140px;"/>
+      <button class="icon-btn" onclick="removeEmployee(${idx})" title="刪除">×</button>
     `;
     list.appendChild(row);
   });
@@ -5745,6 +5825,13 @@ function renderEmployeeList(employees){
       const s = getCurrentSetting();
       State.currentPosition = oldP;
       renderEmployeeStartList(s.employees, s.rules.cyclePattern);
+    });
+  });
+  // From-date input — saves date to model, no re-render needed
+  list.querySelectorAll('input[data-field="from"]').forEach(el=>{
+    el.addEventListener('change', (ev)=>{
+      const i = +ev.target.dataset.idx;
+      employees[i].from = ev.target.value || '';
     });
   });
   // Group select - re-render to update color tags & start preview
@@ -6277,6 +6364,14 @@ async function downloadA4(){
   // Build compact table
   const groupOf = {};
   setting.employees.forEach(e=>{ if(e.name) groupOf[e.name]=e.group;});
+  // Per-date groupOf cache (區間支援)
+  const a4GroupCache = {};
+  function a4GroupOfFor(dateStr){
+    if(!a4GroupCache[dateStr]){
+      a4GroupCache[dateStr] = getGroupOfMap(setting.employees, dateStr);
+    }
+    return a4GroupCache[dateStr];
+  }
 
   // Build swap map for cell rendering (skip pending applications)
   const swapMap = {};
@@ -6305,7 +6400,8 @@ async function downloadA4(){
         const ds = fmt(addDays(startD,w*7+d));
         const cell = (sched.shifts[ds]||{})[shiftKey(shift)] || [];
         html += `<td style="text-align:center; padding:3px 2px;">${cell.length? cell.map(n=>{
-          const g = groupOf[n]||'A';
+          const dateGroupOf = a4GroupOfFor(ds);
+          const g = dateGroupOf[n] || groupOf[n] || 'A';
           const swap = swapMap[ds+'_'+shift+'_'+n];
           if(swap){
             // Parse "Name (Branch)" into name + branch parts
@@ -6464,6 +6560,58 @@ function openAdminLogin(){
   setTimeout(()=>$('adminAccount').focus(), 150);
 }
 
+// ─── Employee Gate Login (entry verification) ──────────────────────
+async function doEmployeeLogin(){
+  const id = $('empLoginId').value.trim();
+  const pwd = $('empLoginPwd').value;
+  const errBox = $('employeeLoginError');
+  errBox.classList.remove('show');
+
+  if(!id || !pwd){
+    errBox.textContent = '請輸入員工編號與密碼';
+    errBox.classList.add('show');
+    return;
+  }
+
+  showLoading('驗證身分中…');
+  const res = await api('verifyEmployee', {employeeId: id, password: pwd});
+  hideLoading();
+
+  if(!res.ok){
+    errBox.textContent = res.error || '員工編號或密碼錯誤';
+    errBox.classList.add('show');
+    return;
+  }
+
+  // Save in sessionStorage so it persists in this tab but not across browser sessions
+  try {
+    sessionStorage.setItem('elite_emp', JSON.stringify({
+      employeeId: res.user.employeeId,
+      name: res.user.name,
+      verifiedAt: Date.now()
+    }));
+  } catch(_){}
+
+  // Hide the gate
+  closeEmployeeGate();
+  toast(`歡迎,${res.user.name}`);
+}
+
+function closeEmployeeGate(){
+  const gate = $('employeeLoginGate');
+  if(gate) gate.classList.remove('show');
+}
+
+function isEmployeeVerified(){
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('elite_emp') || 'null');
+    if(!saved || !saved.employeeId) return false;
+    return true;
+  } catch(_){
+    return false;
+  }
+}
+
 async function doAdminLogin(){
   const account = $('adminAccount').value.trim();
   const pwd = $('adminPwd').value;
@@ -6524,6 +6672,17 @@ document.addEventListener('keydown', (e)=>{
    INIT
    ===================================================================== */
 async function init(){
+  // Employee verification gate: if already verified in this session, hide the gate
+  if(isEmployeeVerified()){
+    closeEmployeeGate();
+  } else {
+    // Gate is shown by default — focus the input
+    setTimeout(() => {
+      const idInput = document.getElementById('empLoginId');
+      if(idInput) idInput.focus();
+    }, 100);
+  }
+
   renderBranchGrid();
   // Default to guest unless previously stored admin session
   if(!State.user || !State.user.role) State.user = {account:'', name:'', role:'guest'};
