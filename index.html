@@ -1466,8 +1466,8 @@
   /* ========== Unsaved Changes Banner (batch save) ========== */
   .unsaved-banner{
     position:fixed;
-    top:84px; right:24px;
-    transform:translateX(120%);
+    bottom:20px; left:20px;
+    transform:translateX(-120%);
     z-index:90;
     background:#fff;
     border:2px solid #d4a83a;
@@ -2187,7 +2187,9 @@
       <div class="section-h">員工名單與分組</div>
       <div class="section-desc">
         分組決定休假日歸屬 (A/B/C/D)。同一組的員工互為輪班搭檔。<br>
-        💡 <b>區間設定</b>:若同一組有交接 (例如:A組原為「琳榕」,於 6/1 起改為「小美」),請新增兩筆 A 組,分別填入「生效起算日」即可。留空 = 一直生效。
+        💡 <b>區間設定 (人員替換)</b>:每位員工可指定生效期間。同一組若有交接,新增多筆即可。<br>
+        &nbsp;&nbsp;範例:櫃台 A 組 → 小玫 (5/10~5/31 離職) + 小貝 (6/1~7/4 接班) → 系統會依日期自動套用對應員工。<br>
+        &nbsp;&nbsp;留空 = 該方向無限制 (空 from = 不限早期 / 空 to = 一直生效)。
       </div>
       <div id="employeeList"></div>
       <button class="btn" onclick="addEmployee()">＋ 新增員工</button>
@@ -3488,7 +3490,8 @@ function renderBranchMonthly(setting){
 function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   const monthStart = new Date(yr, mo-1, 1);
   const firstWeekday = monthStart.getDay(); // 0 (Sun) .. 6 (Sat)
-  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  // 工讀月排班的 schedule key 必須跟儲存時一致 (periodStart 為月份第一天 YYYY-MM-01)
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = State.schedules[monthKey] || {shifts:{}};
 
   // weekTemplate maps dow -> {enabled:[m,n,e], counts:[...]}
@@ -3763,7 +3766,7 @@ async function onPtcCellDrop(ev, date, shiftKey){
   if(!name) return;
 
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
-  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = State.schedules[monthKey] || {shifts:{}};
   monthSched.shifts = monthSched.shifts || {};
   const cell = monthSched.shifts[date] || {};
@@ -3834,7 +3837,7 @@ function openPtcBulkFill(mode){
 async function doPtcBulkFill(){
   const setting = getCurrentSetting();
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
-  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = State.schedules[monthKey] || {shifts:{}};
   monthSched.shifts = monthSched.shifts || {};
 
@@ -3928,7 +3931,7 @@ async function clearPtcMonth(){
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
   if(!confirm(`確定清空 ${yr} 年 ${mo} 月所有工讀排班?\n\n此動作不可復原。`)) return;
 
-  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = {shifts:{}};
   State.schedules[monthKey] = monthSched;
 
@@ -3955,7 +3958,7 @@ async function onPartTimeSlotClick(date, shiftKey, shiftLabel){
     return;
   }
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
-  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}`;
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = State.schedules[monthKey] || {shifts:{}};
   const cell = monthSched.shifts[date] || {};
   // Names stored as array; each entry shows on its own line in the cell
@@ -4481,8 +4484,11 @@ const SWAP_REASONS = [
 
 let _swapCtx = null; // {date, shift, name}
 
-// 依日期決定每個 group 在當天的員工 (考慮 from 起算日)
-// 多筆同 group → 取「from <= date 且 from 最大」者 (沒填 from 視為從很早就生效)
+// 依日期決定每個 group 在當天的員工 (考慮 from~to 區間)
+// 規則:
+//   - from 留空 → 視為 -∞
+//   - to 留空 → 視為 +∞
+//   - 若同 group 在同一日期有多人在區間內 → 取 from 最大者
 // 回傳:已過濾的 employees array,每個 group 只剩當天有效的那筆
 function getEffectiveEmployees(employees, dateStr){
   if(!Array.isArray(employees)) return [];
@@ -4491,8 +4497,10 @@ function getEffectiveEmployees(employees, dateStr){
   employees.forEach(e => {
     if(!e || !e.group) return;
     const from = e.from || '';
-    // Skip if from > dateStr (not yet effective)
-    if(from && from > dateStr) return;
+    const to = e.to || '';
+    // 區間檢查
+    if(from && from > dateStr) return;       // 尚未生效
+    if(to && to < dateStr) return;           // 已過期
     const cur = groupMap[e.group];
     if(!cur || (from > (cur.from || ''))){
       groupMap[e.group] = e;
@@ -5804,19 +5812,23 @@ function renderEmployeeList(employees){
     row.className = 'employee-row';
     row.innerHTML = `
       <div class="group-tag pill-tag ${e.group}">${e.group}</div>
-      <input type="text" data-idx="${idx}" data-field="name" value="${e.name||''}" placeholder="員工姓名"/>
-      <select data-idx="${idx}" data-field="group">
+      <input type="text" data-idx="${idx}" data-field="name" value="${e.name||''}" placeholder="員工姓名" style="flex:1; min-width:80px;"/>
+      <select data-idx="${idx}" data-field="group" style="flex-shrink:0;">
         ${GROUP_LETTERS.map(g=>`<option value="${g}" ${g===e.group?'selected':''}>${g} 組</option>`).join('')}
       </select>
-      <input type="date" data-idx="${idx}" data-field="from" value="${e.from||''}" title="生效起算日 (留空 = 一直生效;若同 group 有多筆,請依時間順序填寫)" style="width:140px;"/>
+      <input type="date" data-idx="${idx}" data-field="from" value="${e.from||''}" title="生效起始日 (留空 = 不限)" style="width:130px;"/>
+      <span style="color:var(--muted); font-size:12px;">~</span>
+      <input type="date" data-idx="${idx}" data-field="to" value="${e.to||''}" title="生效結束日 (留空 = 不限)" style="width:130px;"/>
       <button class="icon-btn" onclick="removeEmployee(${idx})" title="刪除">×</button>
     `;
     list.appendChild(row);
   });
   // Use input event for live updating model without re-render (prevents lost focus)
+  // Also handle IME composition (中文輸入法) and blur as backup
   list.querySelectorAll('input[data-field="name"]').forEach(el=>{
-    el.addEventListener('input', (ev)=>{
+    const updateName = (ev) => {
       const i = +ev.target.dataset.idx;
+      if(!employees[i]) return;
       employees[i].name = ev.target.value;
       // Live-update the start-position list display so the name shows up immediately
       const p = $('setPosition').value;
@@ -5825,13 +5837,23 @@ function renderEmployeeList(employees){
       const s = getCurrentSetting();
       State.currentPosition = oldP;
       renderEmployeeStartList(s.employees, s.rules.cyclePattern);
-    });
+    };
+    el.addEventListener('input', updateName);
+    el.addEventListener('compositionend', updateName);  // IME (中文輸入法) 完成
+    el.addEventListener('blur', updateName);            // failsafe
   });
   // From-date input — saves date to model, no re-render needed
   list.querySelectorAll('input[data-field="from"]').forEach(el=>{
     el.addEventListener('change', (ev)=>{
       const i = +ev.target.dataset.idx;
       employees[i].from = ev.target.value || '';
+    });
+  });
+  // To-date input
+  list.querySelectorAll('input[data-field="to"]').forEach(el=>{
+    el.addEventListener('change', (ev)=>{
+      const i = +ev.target.dataset.idx;
+      employees[i].to = ev.target.value || '';
     });
   });
   // Group select - re-render to update color tags & start preview
@@ -5856,8 +5878,10 @@ function addEmployee(){
   State.currentPosition = p;
   const s = getCurrentSetting();
   State.currentPosition = oldP;
+  // Before mutating model, make sure all current input values are committed to model
+  // (in case IME composition or focus changes haven't fired the 'input' event yet)
+  syncEmployeeInputsToModel(s.employees);
   const nextGroup = GROUP_LETTERS[Math.min(s.employees.length, 3)];
-  // Default new employee to next un-used start index (spread evenly)
   const cycLen = s.rules.cyclePattern.length;
   const defaultStart = ((s.employees.length * Math.floor(cycLen/3)) % cycLen) + 1;
   s.employees.push({group:nextGroup, name:'', startIndex: defaultStart});
@@ -5871,9 +5895,33 @@ function removeEmployee(idx){
   State.currentPosition = p;
   const s = getCurrentSetting();
   State.currentPosition = oldP;
+  syncEmployeeInputsToModel(s.employees);
   s.employees.splice(idx,1);
   renderEmployeeList(s.employees);
   renderEmployeeStartList(s.employees, s.rules.cyclePattern);
+}
+
+// Read all input values from the rendered employee list and write back to model
+// (defensive — covers the case where typing is in progress but 'input' event lagged)
+function syncEmployeeInputsToModel(employees){
+  const list = $('employeeList');
+  if(!list) return;
+  list.querySelectorAll('input[data-field="name"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(employees[i]) employees[i].name = el.value;
+  });
+  list.querySelectorAll('input[data-field="from"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(employees[i]) employees[i].from = el.value || '';
+  });
+  list.querySelectorAll('input[data-field="to"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(employees[i]) employees[i].to = el.value || '';
+  });
+  list.querySelectorAll('select[data-field="group"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(employees[i]) employees[i].group = el.value;
+  });
 }
 
 function renderPeriodList(periods){
