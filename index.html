@@ -3937,14 +3937,18 @@ function getCurrentSetting(){
   if(!Array.isArray(s.rules.cyclePattern) || !s.rules.cyclePattern.length){
     s.rules.cyclePattern = ['早','早','晚','晚','休','休'];
   }
-  s.employees = (s.employees||[]).map(e=>({
-    group: e.group || 'A',
-    name: e.name || '',
-    startIndex: typeof e.startIndex==='number' ? e.startIndex : 1,
-    // 區間設定 (人員替換) — 留空 = 不限
-    from: e.from || '',
-    to:   e.to   || ''
-  }));
+  // Employees migration — in-place 修改,避免每次 getCurrentSetting 重建陣列
+  // (重建會讓 renderEmployeeList 中的 closure 持有「上一輪」的陣列,
+  //  使用者連續打字時最新值反映不到 startList,看起來像「沒更新」)
+  if(!Array.isArray(s.employees)) s.employees = [];
+  s.employees.forEach(e => {
+    if(!e || typeof e !== 'object') return;
+    if(!e.group) e.group = 'A';
+    if(typeof e.name !== 'string') e.name = e.name == null ? '' : String(e.name);
+    if(typeof e.startIndex !== 'number') e.startIndex = 1;
+    if(typeof e.from !== 'string') e.from = e.from || '';
+    if(typeof e.to !== 'string') e.to = e.to || '';
+  });
   if(!s.periods || !s.periods.length){
     s.periods = [{ startDate: defaultPeriodStart() }];
   }
@@ -5051,12 +5055,26 @@ function onCellClick(date, shift, name, evt){
   evt = evt || window.event;
   if(evt) evt.stopPropagation();
   closeCellMenu();
-  // Guests: open the application modal directly with the cell context pre-filled
+  // 員工/訪客身分:過去日期無法調整 (今日之前)
+  // 管理員不受此限制 (可能需要補登記)
   if(State.user.role !== 'admin'){
+    if(isPastDate(date)){
+      toast('過去日期的排班無法再調整,請聯繫管理員','warn');
+      return;
+    }
     openApplyModal({date, shift, name, branch: State.currentBranch, position: State.currentPosition});
     return;
   }
   openSwapModal(date, shift, name);
+}
+
+// 判斷某 YYYY-MM-DD 日期是否早於今天 (純日期比較,不含時間)
+function isPastDate(dateStr){
+  if(!dateStr) return false;
+  const today = new Date();
+  // 把今天歸零到 00:00:00 (本地時區),確保 5/8 整天都不算「過去」
+  const todayStr = fmt(today);
+  return String(dateStr) < todayStr;
 }
 
 /* =====================================================================
@@ -5495,6 +5513,16 @@ function checkApplySwapDateRange(){
   const picked = dateInput.value;
   if(!picked) return;
 
+  // 若使用者非管理員,擋掉過去日期的目標換班日
+  if(State.user.role !== 'admin' && isPastDate(picked)){
+    showAlertModal(
+      `所選換班目標日期 <b>${picked}</b> 已是過去日期,<br>請改選今日或之後的日期`,
+      {title: '⛔ 過去日期無法調整', duration: 3000, icon: '🕒'}
+    );
+    dateInput.value = '';
+    return;
+  }
+
   const {branch, position, date} = _applyCtx;
   const branchSettings = (State.settings || {})[branch];
   const setting = branchSettings && branchSettings[position];
@@ -5672,6 +5700,14 @@ async function submitApply(){
   if(!name){ toast('找不到對應的申請人','warn'); return; }
   if(!date || !branch || !position || !shift){ toast('資料不完整','warn'); return; }
 
+  // 員工/訪客身分:擋掉過去日期的申請 (今日之前)
+  if(State.user.role !== 'admin'){
+    if(isPastDate(date)){
+      toast('過去日期的排班無法再調整,請聯繫管理員','warn');
+      return;
+    }
+  }
+
   if(isSwap){
     const partner = $('applySwapPartner').value.trim();
     if(!partner){ toast('請選擇換班員工','warn'); return; }
@@ -5680,6 +5716,12 @@ async function submitApply(){
     const targetShift = $('applySwapTargetShift').value;
     if(!targetDate){ toast('請選擇換班日期','warn'); return; }
     if(!targetShift){ toast('請選擇換班班別','warn'); return; }
+
+    // 員工身分:換班目標日期也不能是過去
+    if(State.user.role !== 'admin' && isPastDate(targetDate)){
+      toast('換班目標日期已是過去日期,無法申請','warn');
+      return;
+    }
 
     // Validate target date is in same 8-week period
     const branchSettings = (State.settings || {})[branch];
@@ -6703,7 +6745,8 @@ function addPeriod(){
   State.currentPosition = p;
   const s = getCurrentSetting();
   State.currentPosition = oldP;
-  if(s.periods.length>=3){ toast('最多保留 3 個區間','warn'); return; }
+  // 上限保留為合理數值 (例如 24 期 ≈ 約 4 年的 8 週區間),避免使用者誤點導致超大量資料
+  if(s.periods.length >= 24){ toast('已達上限 24 期區間;若需更多請先刪除舊期','warn'); return; }
   // Default to next 8-week cycle
   let nextStart;
   if(s.periods.length){
