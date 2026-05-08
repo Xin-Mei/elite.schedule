@@ -2742,11 +2742,7 @@
             <div class="form-row">
               <label>對方換班班別 <span style="color:#c14a4a;">*</span></label>
               <select id="comboPartnerShift">
-                <option value="">— 請選擇 —</option>
-                <option value="早">早　班</option>
-                <option value="午">午　班</option>
-                <option value="晚">晚　班</option>
-                <option value="出勤">出勤(12HR)</option>
+                <!-- Filled by populateComboBlock based on this position's shift config -->
               </select>
             </div>
           </div>
@@ -5396,10 +5392,9 @@ function openSwapModal(date, shift, name){
   $('swapCover').value = '';
   document.querySelectorAll('.swap-cover-input').forEach(el=>el.value='');
 
-  // 重置 combo 模式欄位
+  // 重置 combo 模式欄位 (comboPartnerShift 由 populateComboBlock innerHTML 處理,不在此清空)
   if($('comboPartner')) $('comboPartner').value = '';
   if($('comboPartnerDate')) $('comboPartnerDate').value = '';
-  if($('comboPartnerShift')) $('comboPartnerShift').value = '';
   if($('comboCoverName')) $('comboCoverName').value = '';
   if($('comboCoverBranch')) $('comboCoverBranch').value = '';
   if($('comboReason')) $('comboReason').value = '缺人';
@@ -5522,17 +5517,48 @@ function populateComboBlock(){
     cbSel.innerHTML = `<option value="">— 請選擇 —</option>` +
       COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
   }
-  // ② 第二段原因 pills — 排除「換班」與「換班+代班」(combo 不該再走 combo)
+  // 對方換班班別 — 依當前院區+職位的設定動態填入 (count > 0 才顯示)
+  // 例:觀音藥師為出勤(12HR) 模式 → 只顯示「出勤」
+  //    一般早晚 → 顯示「早 + 晚」
+  const shSel = $('comboPartnerShift');
+  if(shSel){
+    const rules = (setting && setting.rules) || {};
+    const shiftOpts = [];
+    if((rules.morningCount||0) > 0)    shiftOpts.push({value:'早', label:'早　班'});
+    if((rules.noonCount||0) > 0)       shiftOpts.push({value:'午', label:'午　班'});
+    if((rules.eveningCount||0) > 0)    shiftOpts.push({value:'晚', label:'晚　班'});
+    if((rules.attendanceCount||0) > 0) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
+    // Fallback:全部沒設(防禦) → 顯示全部 4 個
+    if(shiftOpts.length === 0){
+      shiftOpts.push(
+        {value:'早', label:'早　班'},
+        {value:'午', label:'午　班'},
+        {value:'晚', label:'晚　班'},
+        {value:'出勤', label:'出勤(12HR)'}
+      );
+    }
+    // 只有一個 option → 直接 selected (使用者不用再選)
+    // 多個 option → 預設第一個沒選 (留 placeholder)
+    const head = shiftOpts.length === 1
+      ? `<option value="${shiftOpts[0].value}" selected>${shiftOpts[0].label}</option>`
+      : `<option value="">— 請選擇 —</option>` +
+        shiftOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+    shSel.innerHTML = head;
+  }
+  // ② 第二段原因 pills — 排除「換班」、「換班+代班」、「私事支援」
+  // (combo 不該再走 combo;私事支援由使用者透過獨立的「私事支援」原因處理)
   const reasonBox = $('comboReasonPills');
   if(reasonBox){
-    const candidates = SWAP_REASONS.filter(r => r.id !== '換班' && r.id !== '換班+代班');
+    const candidates = SWAP_REASONS.filter(r =>
+      r.id !== '換班' && r.id !== '換班+代班' && r.id !== '私事支援'
+    );
     reasonBox.innerHTML = candidates.map(r =>
       `<button type="button" class="reason-pill ${r.id === '缺人' ? 'active' : ''}" data-reason="${r.id}" data-mode="${r.mode}" onclick="selectComboReason('${r.id}')">${r.label}</button>`
     ).join('');
   }
-  // 重置欄位 (不重置 partner — 使用者可能已選好;但日期/班別/代班欄位每次都重置以避免殘留)
+  // 重置欄位 (不重置 partner — 使用者可能已選好)
+  // 注意:comboPartnerShift 已由上方 innerHTML 設好預設(單 option 自動 selected),不要再清空
   $('comboPartnerDate').value = '';
-  $('comboPartnerShift').value = '';
   $('comboCoverName').value = '';
   $('comboReason').value = '缺人';   // 預設「缺人」
   // partner 預設不勾任何;若使用者上一次選過 (combo 在 modal 開啟期間切走又切回),保留 hidden 值的話也要重 active
@@ -6337,8 +6363,8 @@ async function submitSwap(){
     if(!partner){ toast('請選擇換班員工','warn'); return; }
     if(!partnerDate){ toast('請填寫對方換班日期','warn'); return; }
     if(!partnerShift){ toast('請選擇對方換班班別','warn'); return; }
-    if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班'){
-      toast('第二段原因不可為「換班」或「換班+代班」','warn'); return;
+    if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班' || seg2Reason === '私事支援'){
+      toast('第二段原因不可為「換班」、「換班+代班」或「私事支援」','warn'); return;
     }
     if(!coverBranch){ toast('請選擇代班人員院區','warn'); return; }
     if(!coverNameRaw){ toast('請填寫代班人員姓名','warn'); return; }
@@ -6367,6 +6393,7 @@ async function submitSwap(){
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
     // Rec 1: 本班(原員工 → partner) — mode=swap
+    // note 留空(換班 cell 不顯示 note;若使用者有填備註,留給 Rec3 用即可)
     const rec1 = {
       id: 'STMP' + baseTime + Math.floor(Math.random()*100),
       branch: State.currentBranch,
@@ -6378,7 +6405,7 @@ async function submitSwap(){
       mode: 'swap',
       swapWith: [partner],
       coverName: '',
-      note: recNote ? `[換班+代班] ${recNote}` : '[換班+代班]',
+      note: '',
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
@@ -6394,11 +6421,12 @@ async function submitSwap(){
       mode: 'swap',
       swapWith: [_swapCtx.name],
       coverName: '',
-      note: '[換班+代班 配對]',
+      note: '',
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
     // Rec 3: 本班 partner 缺人/支援/假別,由代班人員代 — 依使用者選的第二段原因
+    // note 只存使用者輸入的備註(空也 OK),避免 cell 顯示「[換班+代班] 由 ... 代班」這類自動字串
     const rec3 = {
       id: 'STMP' + (baseTime+2) + Math.floor(Math.random()*100),
       branch: State.currentBranch,
@@ -6410,7 +6438,7 @@ async function submitSwap(){
       mode: seg2Mode,
       swapWith: [],
       coverName: coverFull,
-      note: '[換班+代班] 由 ' + coverFull + ' 代班',
+      note: recNote,
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
