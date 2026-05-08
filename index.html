@@ -2234,12 +2234,31 @@
   .role-badge .who{font-weight:600;}
   .role-badge .title{opacity:0.85;}
 
-  /* Hide admin-only elements unless role=admin */
+  /* admin-only:管理員 + 中階主管均顯示;員工/訪客隱藏 */
   body[data-role="staff"] .admin-only,
   body[data-role="employee"] .admin-only,
   body[data-role="guest"] .admin-only{display:none !important;}
-  /* Hide guest-only buttons when logged in (admin or employee) */
+
+  /* 中階主管在無權限院區時顯示提示 banner */
+  .manager-scope-banner{
+    max-width:1400px; margin:-4px auto 14px;
+    padding:10px 18px;
+    background:#fff8e6;
+    border:1px solid #e8c97a;
+    border-radius:10px;
+    color:#7a5a0e;
+    font-size:14px;
+    line-height:1.5;
+    margin-left:28px; margin-right:28px;
+  }
+  .manager-scope-banner .ico{
+    font-size:18px; margin-right:6px;
+  }
+  .manager-scope-banner b{ color:#9a6a1f; }
+  /* (manager 角色不在上面 selector 中,所以 admin-only 對 manager 仍然顯示) */
+  /* Hide guest-only buttons when logged in (admin / manager / employee) */
   body[data-role="admin"] .guest-only,
+  body[data-role="manager"] .guest-only,
   body[data-role="employee"] .guest-only{display:none !important;}
   /* Hide employee-only elements unless role=employee */
   body:not([data-role="employee"]) .employee-only{display:none !important;}
@@ -2471,6 +2490,8 @@
       <button class="btn primary admin-only" onclick="downloadA4()">📥 下載圖片</button>
     </div>
   </div>
+  <!-- 中階主管權限提示 banner (僅 manager 在無權限院區時顯示) -->
+  <div id="managerScopeBanner" class="manager-scope-banner" style="display:none;"></div>
 
   <div class="position-bar" id="positionBar"></div>
 
@@ -3657,12 +3678,13 @@ function renderBranchGrid(){
 function openBranch(name){
   State.currentBranch = name;
   State.currentPosition = '櫃台';
-  State.currentPeriodIndex = 0;
   $('homeView').style.display='none';
   $('branchView').classList.add('active');
+  setSmartPeriodIndex();   // 依今日日期自動定位到所屬區間
   renderBranchTitle();
   renderPositionBar();
   renderBranch();
+  if(typeof renderManagerScopeBanner === 'function') renderManagerScopeBanner();
   updateHash();
 }
 
@@ -3689,13 +3711,14 @@ function switchBranch(name){
     return;
   }
   // 切換時保留目前職位的選擇,但若該職位在新院區被設為隱藏,則交給 renderPositionBar 自動 fallback
-  // currentPeriodIndex 重設為 0(因為每個院區的 periods 可能不同)
+  // currentPeriodIndex 依新院區的今日所屬區間自動定位
   State.currentBranch = name;
-  State.currentPeriodIndex = 0;
+  setSmartPeriodIndex();
   // 確保切到新院區後,顯示控制等狀態能正確讀取(會走 localStorage)
   renderBranchTitle();
   renderPositionBar();
   renderBranch();
+  if(typeof renderManagerScopeBanner === 'function') renderManagerScopeBanner();
   updateHash();
   toast('已切換至 ' + name + ' 院區');
 }
@@ -3751,13 +3774,14 @@ function restoreFromHash(){
   if(params.b && BRANCHES.includes(params.b)){
     State.currentBranch = params.b;
     State.currentPosition = (params.p && POSITIONS.includes(params.p)) ? params.p : '櫃台';
-    State.currentPeriodIndex = 0;
+    setSmartPeriodIndex();   // 還原時也依今日定位
     if(params.m) State.partTimeMonth = params.m;
     $('homeView').style.display='none';
     $('branchView').classList.add('active');
     renderBranchTitle();
     renderPositionBar();
     renderBranch();
+    if(typeof renderManagerScopeBanner === 'function') renderManagerScopeBanner();
     // Re-write hash to ensure it matches what we restored
     updateHash();
     return true;
@@ -3809,7 +3833,7 @@ function togglePositionVisibility(pos){
     const firstVisible = POSITIONS.find(p => !hidden.includes(p));
     if(firstVisible){
       State.currentPosition = firstVisible;
-      State.currentPeriodIndex = 0;
+      setSmartPeriodIndex();
       updateHash();
     }
   }
@@ -3841,7 +3865,7 @@ function renderPositionBar(){
     btn.textContent = p;
     btn.onclick = ()=>{
       State.currentPosition = p;
-      State.currentPeriodIndex = 0;
+      setSmartPeriodIndex();   // 切職位時依新職位的 periods 找今日所屬
       renderPositionBar();
       renderBranch();
       updateHash();
@@ -3960,6 +3984,42 @@ function defaultPeriodStart(){
   const d = new Date();
   d.setDate(d.getDate() - d.getDay());
   return fmt(d);
+}
+
+// 找出指定 periods 陣列中,今天所屬的 8 週區間 index
+// 邏輯:
+//   • 今日落在某 period 範圍內 → 回傳該 index
+//   • 今日比所有 period 還早 → 回 0 (最舊的;通常是初次建立但今天還沒到啟動日)
+//   • 今日比所有 period 還晚 → 回最後一個 (最近的歷史紀錄)
+function findPeriodIndexForToday(periods){
+  if(!Array.isArray(periods) || !periods.length) return 0;
+  const todayStr = fmt(new Date());
+  // 為了健壯,先依 startDate 排序找;但不修改原陣列(避免影響呼叫者)
+  const sorted = periods
+    .map((p, originalIdx) => ({startDate: p.startDate, originalIdx}))
+    .filter(p => p.startDate)
+    .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+  if(!sorted.length) return 0;
+  // 找今日落在哪個 period 區間 (含起點與終點 = 起點 + 55 天)
+  for(const p of sorted){
+    const start = p.startDate;
+    const end = fmt(addDays(parseDate(start), 8*7-1));
+    if(todayStr >= start && todayStr <= end) return p.originalIdx;
+  }
+  // 今日比第一期還早
+  if(todayStr < sorted[0].startDate) return sorted[0].originalIdx;
+  // 今日比最後一期還晚
+  return sorted[sorted.length - 1].originalIdx;
+}
+
+// 依目前 (branch, position) 的 setting,把 currentPeriodIndex 設為「今日所屬」
+// 取代直接 = 0,讓使用者一進入畫面就停在當下的區間
+function setSmartPeriodIndex(){
+  const b = State.currentBranch, p = State.currentPosition;
+  if(!b || !p){ State.currentPeriodIndex = 0; return; }
+  const setting = ((State.settings || {})[b] || {})[p];
+  if(!setting || !Array.isArray(setting.periods)){ State.currentPeriodIndex = 0; return; }
+  State.currentPeriodIndex = findPeriodIndexForToday(setting.periods);
 }
 
 function renderBranch(){
@@ -4222,7 +4282,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
 // Per-day micro-adjustment: toggle which shifts are enabled this specific day
 // Edit one cell of the weekly hours table (per dow) — two rows
 async function editPtcHours(dow){
-  if(State.user.role !== 'admin'){ return; }
+  if(!requireEditPermission()) return;
   const setting = getCurrentSetting();
   if(!setting.rules.weekHours) setting.rules.weekHours = [];
   // Normalize: ensure all 7 entries are objects
@@ -4255,7 +4315,7 @@ async function editPtcHours(dow){
 // Click handler — prompt for name, save to schedule
 // ─── STAFF POOL (工讀人員池 — admin only) ──────────────────────────────
 async function addPtcStaff(){
-  if(State.user.role !== 'admin') return;
+  if(!requireEditPermission()) return;
   const name = prompt('新增工讀人員姓名:\n(例如:小貝、診-小貝)');
   if(!name || !name.trim()) return;
   const setting = getCurrentSetting();
@@ -4281,7 +4341,7 @@ async function addPtcStaff(){
 }
 
 async function removePtcStaff(name){
-  if(State.user.role !== 'admin') return;
+  if(!requireEditPermission()) return;
   if(!confirm(`從人員池移除「${name}」?\n\n注意:已排入月曆的記錄不會自動清除。`)) return;
   const setting = getCurrentSetting();
   setting.employees = (setting.employees || []).filter(e => e.name !== name);
@@ -4363,10 +4423,7 @@ async function onPtcCellDrop(ev, date, shiftKey){
 let _ptcBulkMode = 'weekday'; // 'weekday' or 'range'
 
 function openPtcBulkFill(mode){
-  if(State.user.role !== 'admin'){
-    toast('需要管理員權限','warn');
-    return;
-  }
+  if(!requireEditPermission()) return;
   _ptcBulkMode = mode;
   const isWeekday = (mode === 'weekday');
   $('ptcBulkFillTitle').textContent = isWeekday ? '依星期幾批次填入' : '整月/區間批次填入';
@@ -4486,7 +4543,7 @@ async function doPtcBulkFill(){
 }
 
 async function clearPtcMonth(){
-  if(State.user.role !== 'admin') return;
+  if(!requireEditPermission()) return;
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
   if(!confirm(`確定清空 ${yr} 年 ${mo} 月所有工讀排班?\n\n此動作不可復原。`)) return;
 
@@ -4511,11 +4568,8 @@ async function clearPtcMonth(){
 }
 
 async function onPartTimeSlotClick(date, shiftKey, shiftLabel){
-  // Admin-only direct edit
-  if(State.user.role !== 'admin'){
-    toast('排班編輯需要管理員權限','warn');
-    return;
-  }
+  // Admin / manager(可編輯院區) only direct edit
+  if(!requireEditPermission()) return;
   const [yr, mo] = State.partTimeMonth.split('-').map(Number);
   const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
   const monthSched = State.schedules[monthKey] || {shifts:{}};
@@ -5005,10 +5059,7 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
 function onEmptyCellClick(date, shift, evt){
   evt = evt || window.event;
   if(evt) evt.stopPropagation();
-  if(State.user.role !== 'admin'){
-    toast('此操作需要管理員權限','warn');
-    return;
-  }
+  if(!requireEditPermission()) return;
   const setting = getCurrentSetting();
   const employees = setting.employees.filter(e=>e.name);
   if(!employees.length){ toast('請先在「院區設定」加入員工','warn'); return; }
@@ -5055,9 +5106,11 @@ function onCellClick(date, shift, name, evt){
   evt = evt || window.event;
   if(evt) evt.stopPropagation();
   closeCellMenu();
-  // 員工/訪客身分:過去日期無法調整 (今日之前)
-  // 管理員不受此限制 (可能需要補登記)
-  if(State.user.role !== 'admin'){
+  // 過去日期(今日之前)的限制只對非管理員身分:
+  //   • admin / manager(可編輯) → 仍可調整(可能補登)
+  //   • employee / manager(不可編輯院區) → 擋
+  const canEdit = canEditCurrentBranch();
+  if(!canEdit){
     if(isPastDate(date)){
       toast('過去日期的排班無法再調整,請聯繫管理員','warn');
       return;
@@ -5065,6 +5118,7 @@ function onCellClick(date, shift, name, evt){
     openApplyModal({date, shift, name, branch: State.currentBranch, position: State.currentPosition});
     return;
   }
+  // 有編輯權限 (admin 全院區 / manager 在指定院區) → 直接打開編輯 modal
   openSwapModal(date, shift, name);
 }
 
@@ -5835,6 +5889,10 @@ async function submitApply(){
 async function approveApply(id){
   const rec = (State.swaps || []).find(s => s.id === id);
   if(!rec){ toast('找不到該筆申請','error'); return; }
+  // manager 只能核准自己授權院區的申請
+  if(!canEditBranch(rec.branch)){
+    if(!requireEditPermission(rec.branch)) return;
+  }
 
   // For 換班 (mode === 'swap') — find paired record (the other side of the swap)
   // Pairing rule: same createdAt second AND opposite originalName/swapWith
@@ -5902,6 +5960,9 @@ async function approveApply(id){
 async function rejectApply(id){
   const rec = (State.swaps || []).find(s => s.id === id);
   if(!rec){ toast('找不到該筆申請','error'); return; }
+  if(!canEditBranch(rec.branch)){
+    if(!requireEditPermission(rec.branch)) return;
+  }
 
   // Find paired record for swap
   let pairedRec = null;
@@ -6053,6 +6114,7 @@ function onSwapSplitToggle(){
 
 async function submitSwap(){
   if(!_swapCtx){ closeModal('swapModal'); return; }
+  if(!requireEditPermission()){ closeModal('swapModal'); return; }
   const reason = $('swapReason').value;
   const cfg = SWAP_REASONS.find(r=>r.id===reason);
   const mode = cfg.mode;
@@ -6217,8 +6279,9 @@ async function discardUnsavedChanges(){
 function updateUnsavedBanner(){
   const banner = $('unsavedBanner');
   if(!banner) return;
-  // Banner only shown for admin (guest uses immediate-save flow)
-  if(State.user.role !== 'admin'){
+  // Banner shown for admin / manager (員工/訪客 走 immediate-save 申請流程,不需批次儲存)
+  const role = (State.user || {}).role;
+  if(role !== 'admin' && role !== 'manager'){
     banner.classList.remove('show');
     banner.classList.remove('idle');
     return;
@@ -6226,7 +6289,7 @@ function updateUnsavedBanner(){
   const unsavedCount = (State.swaps||[]).filter(s=>s._unsaved).length;
   const delCount = (State.pendingDeletions||[]).length;
   const total = unsavedCount + delCount;
-  // Always show for admin — but visual state differs
+  // Always show for admin/manager — but visual state differs
   banner.classList.add('show');
   $('unsavedCount').textContent = total;
   if(total > 0){
@@ -6265,6 +6328,7 @@ async function doReplace(date, shift, oldName, newName){
    AUTO-GENERATE SCHEDULE
    ===================================================================== */
 async function autoGenerate(){
+  if(!requireEditPermission()) return;
   // 工讀職位無固定循環,不能自動排班
   if(State.currentPosition === '工讀'){
     toast('工讀為兼職人員,請手動填入排班','warn');
@@ -6363,6 +6427,7 @@ async function autoGenerate(){
    SETTINGS MODAL
    ===================================================================== */
 function openSettingsModal(){
+  if(!requireEditPermission()) return;
   $('settingsTitle').textContent = State.currentBranch + ' 院區 - 設定';
   $('setPosition').value = State.currentPosition;
   loadSettingsForPosition();
@@ -6895,6 +6960,7 @@ function loadGlobalPeriods(){
 }
 
 async function saveSettings(){
+  if(!requireEditPermission()) return;
   const pos = $('setPosition').value;
   const oldP = State.currentPosition;
   State.currentPosition = pos;
@@ -7215,6 +7281,12 @@ function goRecordsPage(p){
 }
 
 async function deleteSwap(id){
+  // 找到要刪的 record,用其 branch 判斷權限
+  const rec = (State.swaps || []).find(r => String(r.id) === String(id));
+  const recBranch = rec ? rec.branch : null;
+  if(recBranch && !canEditBranch(recBranch)){
+    if(!requireEditPermission(recBranch)) return;
+  }
   if(!confirm('確定要刪除此筆紀錄?班表將恢復為原始狀態。')) return;
   showLoading('刪除中…');
   await api('deleteSwap', {id});
@@ -7909,13 +7981,23 @@ async function saveSetup(){
 function applyRole(){
   const role = (State.user && State.user.role) || 'guest';
   document.body.dataset.role = role;
+  // role-admin / role-manager / role-employee / role-guest
+  // ※ admin 與 manager 都會顯示後台按鈕;manager 只能編輯指定院區 (在 canEditCurrentBranch 中擋)
   document.body.classList.toggle('role-admin', role === 'admin');
+  document.body.classList.toggle('role-manager', role === 'manager');
   document.body.classList.toggle('role-employee', role === 'employee');
   document.body.classList.toggle('role-guest', role === 'guest');
+  // 為了沿用既有 admin-only CSS,manager 也視為「後台可見」
+  document.body.classList.toggle('role-admin-like', role === 'admin' || role === 'manager');
 
   if(role === 'admin'){
     if($('userName')) $('userName').textContent = State.user.name || State.user.account || '管理員';
     if($('userRole')) $('userRole').textContent = '管理員';
+  } else if(role === 'manager'){
+    if($('userName')) $('userName').textContent = State.user.name || State.user.account || '中階主管';
+    const allowed = getManagerBranches();
+    const allowedLabel = allowed.length ? allowed.join('・') : '(未設定院區)';
+    if($('userRole')) $('userRole').textContent = `中階主管 · ${allowedLabel}`;
   } else if(role === 'employee'){
     if($('empName'))  $('empName').textContent  = State.user.name  || State.user.employeeId || '員工';
     if($('empTitle')) $('empTitle').textContent = State.user.jobTitle || '員工';
@@ -7926,7 +8008,76 @@ function applyRole(){
   if(State.currentBranch){
     if(typeof renderBranchTitle === 'function') renderBranchTitle();
     if(typeof renderPositionBar === 'function') renderPositionBar();
+    if(typeof renderManagerScopeBanner === 'function') renderManagerScopeBanner();
   }
+}
+
+// 取得 manager 可管理的院區清單 (從 State.user.branch 解析,用逗號/空格/頓號分隔)
+function getManagerBranches(){
+  const u = State.user || {};
+  if(u.role !== 'manager') return [];
+  const raw = String(u.branch || '');
+  return raw.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean).filter(b => BRANCHES.includes(b));
+}
+
+// 判斷當前使用者是否能編輯指定院區
+//   • admin → 永遠 true (全院區)
+//   • manager → 視 branch 欄位指定的清單而定
+//   • 其他 → false
+function canEditBranch(branchName){
+  const u = State.user || {};
+  if(u.role === 'admin') return true;
+  if(u.role === 'manager'){
+    if(!branchName) return false;
+    const allowed = getManagerBranches();
+    return allowed.includes(branchName);
+  }
+  return false;
+}
+
+// 便捷:檢查當前 (State.currentBranch) 是否可編輯
+function canEditCurrentBranch(){
+  return canEditBranch(State.currentBranch);
+}
+
+// 守護函式:呼叫前檢查是否能編輯當前院區。若不行,跳出提示並回傳 false
+// 編輯動作前先呼叫:if(!requireEditPermission()) return;
+function requireEditPermission(branchName){
+  const target = branchName || State.currentBranch;
+  if(canEditBranch(target)) return true;
+  const u = State.user || {};
+  if(u.role === 'manager'){
+    const allowed = getManagerBranches();
+    const list = allowed.length ? allowed.join('、') : '(尚未設定)';
+    toast(`您僅有 ${list} 院區的編輯權限,${target} 院區僅供瀏覽`, 'warn');
+  } else if(u.role === 'employee' || u.role === 'guest'){
+    toast('此操作需要管理員權限', 'warn');
+  } else {
+    toast('您沒有此操作權限', 'warn');
+  }
+  return false;
+}
+
+// 渲染 manager 在無權限院區時的提示 banner
+//   • 僅 role=manager 且當前院區不在可管理清單時顯示
+//   • admin / employee / guest 一律隱藏
+function renderManagerScopeBanner(){
+  const banner = $('managerScopeBanner');
+  if(!banner) return;
+  const u = State.user || {};
+  if(u.role !== 'manager' || !State.currentBranch){
+    banner.style.display = 'none';
+    return;
+  }
+  const allowed = getManagerBranches();
+  if(allowed.includes(State.currentBranch)){
+    banner.style.display = 'none';
+    return;
+  }
+  // 不在可管理清單 → 顯示提示
+  const list = allowed.length ? allowed.join('、') : '(尚未設定院區)';
+  banner.innerHTML = `<span class="ico">🔒</span>此院區 (<b>${State.currentBranch}</b>) 僅供瀏覽。您的編輯權限限定於:<b>${list}</b>`;
+  banner.style.display = '';
 }
 
 // Hardcoded admin credentials (must match Code.gs HARDCODED_ADMIN_ID/PWD)
