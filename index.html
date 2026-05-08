@@ -2682,6 +2682,7 @@
         <input type="hidden" id="swapReason" value="換班"/>
         <div class="reason-pills" id="reasonPills">
           <button type="button" class="reason-pill active" data-reason="換班" data-mode="swap" onclick="selectReason('換班')">換　班</button>
+          <button type="button" class="reason-pill admin-only-pill" data-reason="換班+代班" data-mode="combo" onclick="selectReason('換班+代班')" title="先跟同職位員工換班,再為對方那班找代班 — 一次填完">換班+代班</button>
           <button type="button" class="reason-pill" data-reason="私事支援" data-mode="support" onclick="selectReason('私事支援')">私事支援</button>
           <button type="button" class="reason-pill admin-only-pill" data-reason="缺人" data-mode="leave" onclick="selectReason('缺人')">缺　人</button>
           <button type="button" class="reason-pill admin-only-pill" data-reason="生理假" data-mode="leave" onclick="selectReason('生理假')">生理假</button>
@@ -2705,6 +2706,61 @@
           <input type="hidden" id="swapWith1" value=""/>
           <div id="swapPartnerPills" class="swap-partner-pills">
             <!-- Filled by openSwapModal -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Block A2: 換班+代班 (mode=combo) — 一次填完換班 + 該班缺人代班 -->
+      <div id="swapBlockCombo" style="display:none;">
+        <!-- 第一段:先換班 -->
+        <div class="split-segment">
+          <div class="split-segment-head">① 先換班</div>
+          <div class="form-row">
+            <label>換班員工 <span style="color:#c14a4a;">*</span> <span style="color:var(--muted); font-weight:normal; font-size:13px;">— 同院區同職位員工</span></label>
+            <input type="hidden" id="comboPartner" value=""/>
+            <div id="comboPartnerPills" class="swap-partner-pills">
+              <!-- Filled by openSwapModal -->
+            </div>
+          </div>
+          <div class="form-grid form-grid-2">
+            <div class="form-row">
+              <label>對方換班日期 <span style="color:#c14a4a;">*</span></label>
+              <input type="date" id="comboPartnerDate"/>
+              <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+                對方原本上班的某天 (限同 8 週區間)
+              </div>
+            </div>
+            <div class="form-row">
+              <label>對方換班班別 <span style="color:#c14a4a;">*</span></label>
+              <select id="comboPartnerShift">
+                <option value="">— 請選擇 —</option>
+                <option value="早">早　班</option>
+                <option value="午">午　班</option>
+                <option value="晚">晚　班</option>
+                <option value="出勤">出勤(12HR)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第二段:對方換來這格後缺人,找代班 -->
+        <div class="split-segment" style="margin-top:12px;">
+          <div class="split-segment-head">② 該班缺人 — 找代班</div>
+          <div class="form-grid form-grid-2">
+            <div class="form-row">
+              <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+              <select id="comboCoverBranch">
+                <option value="">— 請選擇 —</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+              <input type="text" id="comboCoverName" placeholder="如:王小美"/>
+            </div>
+          </div>
+          <div style="font-size:13px; color:var(--muted); margin-top:6px; padding:8px 12px; background:#f4f1e8; border-radius:6px;">
+            💡 系統會自動建立 3 筆紀錄:換班雙向兩筆 + 對方該班缺人代班一筆。<br>
+            原員工不影響上班日,對方因缺人字卡將顯示 −1。
           </div>
         </div>
       </div>
@@ -4702,11 +4758,11 @@ function renderSummary(setting, period){
   swaps.forEach(s=>{
     const orig = s.originalName;
     if(!offAdjustments[orig]) return; // employee no longer in this position
-    // 缺人 — 不影響休假計算 (員工實際上還是要上班,只是缺另一位)
-    if(s.reason === '缺人') return;
+    // 規則:除了「換班」(swap mode) 整體中性外,其他原因 (缺人 / 私事支援 / 各種假別)
+    //      都會讓原員工該日視為休假 → leaveDays +1 → 字卡顯示「37 −1」
     const grp = groupOfNameOnDate(orig, s.date);
     if(s.mode === 'support' || s.mode === 'leave'){
-      // 私事支援 (support) 與各種假別 (leave) 處理相同:
+      // 私事支援 (support) 與各種假別 (leave,含缺人) 處理相同:
       //   - 原員工該日視為休假,休假日 +1 天
       //   - 代班人 (coverName) 可能不在本院區員工名單中,故不計入本院區任何人的工時
       offAdjustments[orig].leaveDays += 1;
@@ -5013,7 +5069,20 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
   }
   return names.map(n=>{
     const g = groupOf[n] || 'A';
-    const swap = swapMap[dateStr+'_'+shift+'_'+n];
+    let swap = swapMap[dateStr+'_'+shift+'_'+n];
+
+    // ─── 鏈式追蹤 (combo 場景) ─────────────────────────────────────
+    // 「換班+代班」會建立 3 筆紀錄,該 cell 的「曾」→ swap → B,
+    // 而 B 那位置又有 leave (代班人員)。原本 swap chain 只追到第一層 swap,
+    // 看不到後續的 leave。這裡若偵測到 swap.mode==='swap',再用 swapWith[0]
+    // 當原員工去查 swapMap 中是否還有更後續的紀錄,把最終那筆當作真正顯示用 swap。
+    if(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0]){
+      const next = swapMap[dateStr+'_'+shift+'_'+swap.swapWith[0]];
+      if(next && next.mode !== 'swap'){
+        // 第二層是 leave/support → 用第二層當顯示對象 (代班人員紅/黃底)
+        swap = next;
+      }
+    }
 
     if(swap){
       const isAdmin = State.user.role === 'admin';
@@ -5178,6 +5247,7 @@ function isPastDate(dateStr){
    ===================================================================== */
 const SWAP_REASONS = [
   {id:'換班',     label:'換　班',   mode:'swap',    color:'gray',   desc:'與同院區員工互換班別'},
+  {id:'換班+代班', label:'換班+代班', mode:'combo',  color:'gray',   desc:'先換班再請代班 — 一次填完,系統自動拆兩段'},
   {id:'私事支援', label:'私事支援', mode:'support', color:'yellow', desc:'其他人代為上班 (員工私下調換)'},
   {id:'缺人',     label:'缺　人',   mode:'leave',   color:'red',    desc:'無人可上,需安排代班'},
   {id:'生理假',   label:'生理假',   mode:'leave',   color:'red',    desc:''},
@@ -5310,6 +5380,13 @@ function openSwapModal(date, shift, name){
   $('swapCover').value = '';
   document.querySelectorAll('.swap-cover-input').forEach(el=>el.value='');
 
+  // 重置 combo 模式欄位
+  if($('comboPartner')) $('comboPartner').value = '';
+  if($('comboPartnerDate')) $('comboPartnerDate').value = '';
+  if($('comboPartnerShift')) $('comboPartnerShift').value = '';
+  if($('comboCoverName')) $('comboCoverName').value = '';
+  if($('comboCoverBranch')) $('comboCoverBranch').value = '';
+
   if(existing){
     // Pre-fill form with existing values
     _swapCtx.existingId = existing.id;
@@ -5399,6 +5476,50 @@ function openSwapModal(date, shift, name){
 function selectSwapPartner(name){
   $('swapWith1').value = name;
   document.querySelectorAll('#swapPartnerPills .partner-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.name === name);
+  });
+}
+
+// ─── 換班+代班 (combo) 模式專用 ────────────────────────────────────
+// 填充 partner pills(同職位其他員工) + 代班院區下拉
+function populateComboBlock(){
+  if(!_swapCtx) return;
+  const setting = getCurrentSetting();
+  const me = _swapCtx.name;
+  const pillsBox = $('comboPartnerPills');
+  if(!pillsBox) return;
+  // partner 候選:同院區同職位、不是自己 (含佔位符員工如 'B')
+  const partners = (setting.employees || []).filter(e => e.name && e.name !== me);
+  if(partners.length === 0){
+    pillsBox.innerHTML = `<div class="empty-msg">⚠️ 此院區除本人外無其他同職位員工可換班</div>`;
+  } else {
+    pillsBox.innerHTML = partners.map(e =>
+      `<button type="button" class="partner-pill" data-name="${e.name}" onclick="selectComboPartner('${e.name}')">
+        <span class="group-tag">${e.group}</span>${e.name}
+      </button>`
+    ).join('');
+  }
+  // 代班院區下拉
+  const cbSel = $('comboCoverBranch');
+  if(cbSel && cbSel.options.length <= 1){
+    cbSel.innerHTML = `<option value="">— 請選擇 —</option>` +
+      COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+  }
+  // 重置欄位 (不重置 partner — 使用者可能已選好;但日期/班別/代班欄位每次都重置以避免殘留)
+  $('comboPartnerDate').value = '';
+  $('comboPartnerShift').value = '';
+  $('comboCoverName').value = '';
+  // partner 預設不勾任何;若使用者上一次選過 (combo 在 modal 開啟期間切走又切回),保留 hidden 值的話也要重 active
+  const cur = $('comboPartner').value;
+  if(cur){
+    const btn = pillsBox.querySelector(`[data-name="${cur}"]`);
+    if(btn) btn.classList.add('active');
+  }
+}
+
+function selectComboPartner(name){
+  $('comboPartner').value = name;
+  document.querySelectorAll('#comboPartnerPills .partner-pill').forEach(p => {
     p.classList.toggle('active', p.dataset.name === name);
   });
 }
@@ -6106,6 +6227,7 @@ function applySwapModeUI(){
   });
   // Show/hide blocks
   $('swapBlockSwap').style.display     = (mode==='swap')    ? '' : 'none';
+  $('swapBlockCombo').style.display    = (mode==='combo')   ? '' : 'none';
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
 
@@ -6123,9 +6245,15 @@ function applySwapModeUI(){
     }
   }
 
+  // 切到 combo 模式時,初始化 partner pills 與代班院區下拉
+  if(mode === 'combo'){
+    populateComboBlock();
+  }
+
   // Update color hint
   const hint = $('swapColorHint');
   if(mode==='swap'){ hint.textContent='送出後 → 班表顯示為灰底黑字';   hint.className='swap-color-hint h-gray'; }
+  else if(mode==='combo'){ hint.textContent='送出後 → 系統自動建立 3 筆紀錄(換班+代班)'; hint.className='swap-color-hint h-gray'; }
   else if(mode==='support'){ hint.textContent='送出後 → 班表顯示為黃底黑字'; hint.className='swap-color-hint h-yellow'; }
   else { hint.textContent='送出後 → 班表顯示為紅色系'; hint.className='swap-color-hint h-red'; }
 }
@@ -6161,6 +6289,100 @@ async function submitSwap(){
   const reason = $('swapReason').value;
   const cfg = SWAP_REASONS.find(r=>r.id===reason);
   const mode = cfg.mode;
+
+  // ─── 換班+代班 (combo 模式) — 一次建立 3 筆紀錄 ────────────────────
+  if(mode === 'combo'){
+    const partner = ($('comboPartner').value || '').trim();
+    const partnerDate = ($('comboPartnerDate').value || '').trim();
+    const partnerShift = ($('comboPartnerShift').value || '').trim();
+    const coverBranch = ($('comboCoverBranch').value || '').trim();
+    const coverNameRaw = ($('comboCoverName').value || '').trim();
+    if(!partner){ toast('請選擇換班員工','warn'); return; }
+    if(!partnerDate){ toast('請填寫對方換班日期','warn'); return; }
+    if(!partnerShift){ toast('請選擇對方換班班別','warn'); return; }
+    if(!coverBranch){ toast('請選擇代班人員院區','warn'); return; }
+    if(!coverNameRaw){ toast('請填寫代班人員姓名','warn'); return; }
+    if(partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
+      toast('換班日期/班別不可與本班相同','warn'); return;
+    }
+    // 編輯既有紀錄不支援 combo (combo 是「一次建多筆」的合併操作,難以對應單一既有紀錄)
+    if(_swapCtx.existingId){
+      toast('「換班+代班」不支援編輯既有紀錄,請刪除後重建','warn');
+      return;
+    }
+    // 換班目標日須在當前 8 週區間內 (與 swap 一致的限制)
+    const setting = getCurrentSetting();
+    const period = setting.periods[State.currentPeriodIndex];
+    if(period){
+      const startD = parseDate(period.startDate);
+      const endD = addDays(startD, 8*7-1);
+      const tgtD = parseDate(partnerDate);
+      if(tgtD < startD || tgtD > endD){
+        toast(`對方換班日期 ${partnerDate} 不在當前 8 週區間內`,'warn');
+        return;
+      }
+    }
+    const recNote = ($('swapNote').value || '').trim();
+    const coverFull = `${coverNameRaw} (${coverBranch})`;
+    const baseTime = Date.now();
+    const sharedCreatedAt = new Date().toISOString();
+    // Rec 1: 本班(原員工 → partner) — mode=swap
+    const rec1 = {
+      id: 'STMP' + baseTime + Math.floor(Math.random()*100),
+      branch: State.currentBranch,
+      position: State.currentPosition,
+      date: _swapCtx.date,
+      shift: _swapCtx.shift,
+      originalName: _swapCtx.name,
+      reason: '換班',
+      mode: 'swap',
+      swapWith: [partner],
+      coverName: '',
+      note: recNote ? `[換班+代班] ${recNote}` : '[換班+代班]',
+      createdAt: sharedCreatedAt,
+      _unsaved: true,
+    };
+    // Rec 2: 對方那班(partner → 原員工) — mode=swap (配對 Rec1,使換班整體中性)
+    const rec2 = {
+      id: 'STMP' + (baseTime+1) + Math.floor(Math.random()*100),
+      branch: State.currentBranch,
+      position: State.currentPosition,
+      date: partnerDate,
+      shift: partnerShift,
+      originalName: partner,
+      reason: '換班',
+      mode: 'swap',
+      swapWith: [_swapCtx.name],
+      coverName: '',
+      note: '[換班+代班 配對]',
+      createdAt: sharedCreatedAt,
+      _unsaved: true,
+    };
+    // Rec 3: 本班 partner 缺人,由代班人員代 — mode=leave reason=缺人
+    const rec3 = {
+      id: 'STMP' + (baseTime+2) + Math.floor(Math.random()*100),
+      branch: State.currentBranch,
+      position: State.currentPosition,
+      date: _swapCtx.date,
+      shift: _swapCtx.shift,
+      originalName: partner,
+      reason: '缺人',
+      mode: 'leave',
+      swapWith: [],
+      coverName: coverFull,
+      note: '[換班+代班] 由 ' + coverFull + ' 代班',
+      createdAt: sharedCreatedAt,
+      _unsaved: true,
+    };
+    State.swaps = State.swaps || [];
+    State.swaps.push(rec1, rec2, rec3);
+    toast(`換班+代班 已建立 3 筆紀錄 (待儲存)`);
+    closeModal('swapModal');
+    renderBranch();
+    updateUnsavedBanner();
+    if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
+    return;
+  }
 
   let swapWith = [];
   let coverName = '';
