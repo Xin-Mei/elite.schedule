@@ -353,9 +353,9 @@
     background:#fff;
     color:var(--teal-800);
     border-radius:999px;
-    padding:6px 14px;
+    padding:8px 18px;
     font-family:"Noto Serif TC", serif;
-    font-size:15px;
+    font-size:18px;
     letter-spacing:2px;
     font-weight:500;
     cursor:pointer;
@@ -1214,6 +1214,19 @@
     border-radius:12px;
     padding:12px 16px;
     margin-bottom:14px;
+    /* sticky:捲到月底時人員池仍黏在 viewport 頂端,方便拖曳到任何日期格 */
+    /* top:8px 讓人員池與畫面頂端保留 8px 緩衝;z-index 避免被排班表覆蓋 */
+    position:sticky;
+    top:8px;
+    z-index:20;
+    box-shadow:0 2px 8px rgba(0,0,0,0.06);
+  }
+  /* 手機 / 平板:取消 sticky (螢幕窄,sticky 會擋掉太多排班表內容) */
+  @media (max-width: 720px){
+    .ptc-staff-pool{
+      position:static;
+      box-shadow:none;
+    }
   }
   .ptc-staff-pool-head{
     display:flex; align-items:center; justify-content:space-between;
@@ -7064,7 +7077,7 @@ function renderRecords(){
   let html = statsHtml;
   // 列表表頭
   html += `<div class="record-item" style="background:var(--teal-50); font-size:13px; color:var(--muted); letter-spacing:1px; font-weight:600;">
-    <div>原因</div><div>院區</div><div>職位</div><div>原本人員</div><div>日期</div><div>班別</div><div>代班/換班對象</div><div>備註</div><div>操作</div>
+    <div>原因</div><div>院區</div><div>職位</div><div>原本人員</div><div>日期</div><div>班別</div><div>代班/支援對象</div><div>備註</div><div>操作</div>
   </div>`;
   const isAdmin = State.user.role === 'admin';
   pageItems.forEach(r=>{
