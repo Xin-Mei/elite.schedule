@@ -2717,6 +2717,21 @@
             <!-- Filled by openSwapModal -->
           </div>
         </div>
+        <div class="form-grid form-grid-2">
+          <div class="form-row">
+            <label>對方換班日期 <span style="color:#c14a4a;">*</span></label>
+            <input type="date" id="swapPartnerDate"/>
+            <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+              對方原本上班的某天 (限同 8 週區間)
+            </div>
+          </div>
+          <div class="form-row">
+            <label>對方換班班別 <span style="color:#c14a4a;">*</span></label>
+            <select id="swapPartnerShift">
+              <!-- Filled by openSwapModal based on this position's shift config -->
+            </select>
+          </div>
+        </div>
       </div>
 
       <!-- Block A2: 換班+代班 (mode=combo) — 一次填完換班 + 該班缺人代班 -->
@@ -5441,6 +5456,30 @@ function openSwapModal(date, shift, name){
   }
   $('swapLeaveCoverName').value = '';
 
+  // ─── Populate swap-mode 對方換班班別 dropdown ────────────────────────
+  // 依當前院區+職位的設定動態填入 (count > 0 才顯示) — 與 combo 同邏輯
+  const sptSel = $('swapPartnerShift');
+  if(sptSel){
+    const rules = (setting && setting.rules) || {};
+    const shiftOpts = [];
+    if((rules.morningCount||0) > 0)    shiftOpts.push({value:'早', label:'早　班'});
+    if((rules.noonCount||0) > 0)       shiftOpts.push({value:'午', label:'午　班'});
+    if((rules.eveningCount||0) > 0)    shiftOpts.push({value:'晚', label:'晚　班'});
+    if((rules.attendanceCount||0) > 0) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
+    if(shiftOpts.length === 0){
+      shiftOpts.push(
+        {value:'早', label:'早　班'},{value:'午', label:'午　班'},
+        {value:'晚', label:'晚　班'},{value:'出勤', label:'出勤(12HR)'}
+      );
+    }
+    // 只有一個 option → 直接 selected;否則留 placeholder 讓使用者選
+    sptSel.innerHTML = (shiftOpts.length === 1)
+      ? `<option value="${shiftOpts[0].value}" selected>${shiftOpts[0].label}</option>`
+      : `<option value="">— 請選擇 —</option>` +
+        shiftOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  }
+  if($('swapPartnerDate')) $('swapPartnerDate').value = '';
+
   $('swapWith1').value = '';
   $('swapCover').value = '';
   document.querySelectorAll('.swap-cover-input').forEach(el=>el.value='');
@@ -5471,6 +5510,21 @@ function openSwapModal(date, shift, name){
         }
         const btn = pillsBox.querySelector(`[data-name="${sw[0]}"]`);
         if(btn) btn.classList.add('active');
+        // 還原「對方換班日期 / 班別」— 找配對的另一筆 record
+        // 配對條件:同 branch+position, mode=swap, 對方互換, createdAt 5 秒內 (同批次)
+        const paired = (State.swaps || []).find(o =>
+          o !== existing &&
+          o.mode === 'swap' &&
+          o.branch === existing.branch &&
+          o.position === existing.position &&
+          o.originalName === sw[0] &&
+          Array.isArray(o.swapWith) && o.swapWith[0] === existing.originalName &&
+          Math.abs(new Date(o.createdAt) - new Date(existing.createdAt)) < 5000
+        );
+        if(paired){
+          if($('swapPartnerDate')) $('swapPartnerDate').value = paired.date || '';
+          if($('swapPartnerShift')) $('swapPartnerShift').value = paired.shift || '';
+        }
       }
     } else {
       $('swapCover').value = existing.coverName || '';
@@ -6280,14 +6334,34 @@ async function restoreOriginalSwap(){
   // 偵測是否屬於 combo 群組(換班+代班 自動建立的 3 筆)
   const groupMembers = target ? findComboGroupMembers(target) : [];
   const isCombo = !!getComboGroupId(target);
-  const totalCount = 1 + groupMembers.length;
-  const confirmMsg = isCombo
-    ? `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併取消?`
-    : '確定要取消此換班/支援設定,還原為原排班?';
+  // 偵測是否為「普通換班配對」(swap mode 配對,5 秒內、互換 originalName)
+  let pairedSwap = null;
+  if(target && target.mode === 'swap' && !isCombo){
+    pairedSwap = (State.swaps || []).find(o =>
+      o !== target &&
+      o.mode === 'swap' &&
+      o.branch === target.branch &&
+      o.position === target.position &&
+      o.originalName === (target.swapWith && target.swapWith[0]) &&
+      Array.isArray(o.swapWith) && o.swapWith[0] === target.originalName &&
+      Math.abs(new Date(o.createdAt) - new Date(target.createdAt)) < 5000
+    );
+  }
+  // 統一收集要移除的紀錄
+  const extraMembers = isCombo ? groupMembers : (pairedSwap ? [pairedSwap] : []);
+  const totalCount = 1 + extraMembers.length;
+  let confirmMsg;
+  if(isCombo){
+    confirmMsg = `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併取消?`;
+  } else if(pairedSwap){
+    confirmMsg = `這是雙向換班,將同步取消對方那筆 (${pairedSwap.date} ${pairedSwap.shift}班),確定?`;
+  } else {
+    confirmMsg = '確定要取消此換班/支援設定,還原為原排班?';
+  }
   if(!confirm(confirmMsg)) return;
 
-  // 從 State.swaps 中移除目標 + combo 群組成員
-  const toRemove = [target, ...groupMembers].filter(Boolean);
+  // 從 State.swaps 中移除目標 + 配對紀錄
+  const toRemove = [target, ...extraMembers].filter(Boolean);
   toRemove.forEach(rec => {
     const idx = (State.swaps || []).findIndex(s => s === rec);
     if(idx >= 0) State.swaps.splice(idx, 1);
@@ -6307,12 +6381,16 @@ async function restoreOriginalSwap(){
   if(document.getElementById('homeRecords') && document.getElementById('homeRecords').style.display !== 'none'){
     renderRecords();
   }
-  // toast 訊息 — combo 顯示一併取消的筆數
+  // toast 訊息
   const allLocalOnly = toRemove.every(r => String(r.id || '').startsWith('STMP'));
   if(isCombo){
     toast(allLocalOnly
       ? `已取消「換班+代班」共 ${totalCount} 筆 (本地暫存,未送至 Sheet)`
       : `已取消「換班+代班」共 ${totalCount} 筆 (待儲存)`);
+  } else if(pairedSwap){
+    toast(allLocalOnly
+      ? `已取消雙向換班共 ${totalCount} 筆 (本地暫存,未送至 Sheet)`
+      : `已取消雙向換班共 ${totalCount} 筆 (待儲存)`);
   } else {
     toast(allLocalOnly ? '已還原 (本地暫存,未送至 Sheet)' : '已還原 (待儲存)');
   }
@@ -6397,7 +6475,7 @@ function applySwapModeUI(){
 
   // Update color hint
   const hint = $('swapColorHint');
-  if(mode==='swap'){ hint.textContent='送出後 → 班表顯示為灰底黑字';   hint.className='swap-color-hint h-gray'; }
+  if(mode==='swap'){ hint.textContent='送出後 → 系統自動建立 2 筆紀錄(雙向換班),班表顯示為灰底黑字';   hint.className='swap-color-hint h-gray'; }
   else if(mode==='combo'){ hint.textContent='送出後 → 系統自動建立 3 筆紀錄(換班+代班)'; hint.className='swap-color-hint h-gray'; }
   else if(mode==='support'){ hint.textContent='送出後 → 班表顯示為黃底黑字'; hint.className='swap-color-hint h-yellow'; }
   else { hint.textContent='送出後 → 班表顯示為紅色系'; hint.className='swap-color-hint h-red'; }
@@ -6540,14 +6618,102 @@ async function submitSwap(){
     return;
   }
 
+  // ─── 換班 mode (mode=swap) — 建立雙向 2 筆 record (本班 + 對方班配對) ──
+  if(mode === 'swap'){
+    const w1 = ($('swapWith1').value || '').trim();
+    const partnerDate = ($('swapPartnerDate').value || '').trim();
+    const partnerShift = ($('swapPartnerShift').value || '').trim();
+    if(!w1){ toast('請選擇換班員工','warn'); return; }
+    if(!partnerDate){ toast('請填寫對方換班日期','warn'); return; }
+    if(!partnerShift){ toast('請選擇對方換班班別','warn'); return; }
+    if(partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
+      toast('對方換班日期/班別不可與本班相同','warn'); return;
+    }
+    // 換班目標日須在當前 8 週區間內
+    const setting2 = getCurrentSetting();
+    const period2 = setting2.periods[State.currentPeriodIndex];
+    if(period2){
+      const startD = parseDate(period2.startDate);
+      const endD = addDays(startD, 8*7-1);
+      const tgtD = parseDate(partnerDate);
+      if(tgtD < startD || tgtD > endD){
+        toast(`對方換班日期 ${partnerDate} 不在當前 8 週區間內`,'warn');
+        return;
+      }
+    }
+    const recNoteSwap = ($('swapNote').value || '').trim();
+    const baseTime = Date.now();
+    const sharedCreatedAt = new Date().toISOString();
+    // 編輯既有紀錄 → 先把舊的(以及配對的另一筆)從 State 移除
+    if(_swapCtx.existingId){
+      const oldIdStr = String(_swapCtx.existingId);
+      const oldRec = (State.swaps||[]).find(s => String(s.id) === oldIdStr);
+      const oldPaired = oldRec ? (State.swaps||[]).find(o =>
+        o !== oldRec &&
+        o.mode === 'swap' &&
+        o.branch === oldRec.branch &&
+        o.position === oldRec.position &&
+        o.originalName === (oldRec.swapWith && oldRec.swapWith[0]) &&
+        Array.isArray(o.swapWith) && o.swapWith[0] === oldRec.originalName &&
+        Math.abs(new Date(o.createdAt) - new Date(oldRec.createdAt)) < 5000
+      ) : null;
+      // 從 State.swaps 移除舊紀錄
+      [oldRec, oldPaired].filter(Boolean).forEach(rec => {
+        const idx = (State.swaps || []).findIndex(s => s === rec);
+        if(idx >= 0) State.swaps.splice(idx, 1);
+        const rid = String(rec.id || '');
+        if(!rid.startsWith('STMP') && rid){
+          State.pendingDeletions = State.pendingDeletions || [];
+          if(!State.pendingDeletions.includes(rec.id)) State.pendingDeletions.push(rec.id);
+        }
+      });
+    }
+    // 建立新雙向 2 筆 — 本班(原員工 → partner)
+    const swapRec1 = {
+      id: 'STMP' + baseTime + Math.floor(Math.random()*100),
+      branch: State.currentBranch,
+      position: State.currentPosition,
+      date: _swapCtx.date,
+      shift: _swapCtx.shift,
+      originalName: _swapCtx.name,
+      reason: '換班',
+      mode: 'swap',
+      swapWith: [w1],
+      coverName: '',
+      note: recNoteSwap,
+      createdAt: sharedCreatedAt,
+      _unsaved: true,
+    };
+    // 對方那班(partner → 原員工) — 配對 swapRec1,使換班整體中性
+    const swapRec2 = {
+      id: 'STMP' + (baseTime+1) + Math.floor(Math.random()*100),
+      branch: State.currentBranch,
+      position: State.currentPosition,
+      date: partnerDate,
+      shift: partnerShift,
+      originalName: w1,
+      reason: '換班',
+      mode: 'swap',
+      swapWith: [_swapCtx.name],
+      coverName: '',
+      note: '',
+      createdAt: sharedCreatedAt,
+      _unsaved: true,
+    };
+    State.swaps = State.swaps || [];
+    State.swaps.push(swapRec1, swapRec2);
+    toast(`換班 已建立 (${_swapCtx.date} ⇄ ${partnerDate}, 待儲存)`);
+    closeModal('swapModal');
+    renderBranch();
+    updateUnsavedBanner();
+    if(document.getElementById('homeRecords').style.display !== 'none') renderRecords();
+    return;
+  }
+
   let swapWith = [];
   let coverName = '';
   let splitNotes = null;  // 兩段班時用,個別段的備註
-  if(mode === 'swap'){
-    const w1 = $('swapWith1').value.trim();
-    if(!w1){ toast('請選擇換班員工','warn'); return; }
-    swapWith = [w1];
-  } else if(mode === 'leave'){
+  if(mode === 'leave'){
     // 偵測「該日為兩段班」勾選狀態
     const splitToggle = $('swapSplitToggle');
     const isSplit = splitToggle && splitToggle.checked && _swapCtx.shift === '出勤';
@@ -7743,20 +7909,45 @@ async function deleteSwap(id){
   // 偵測 combo 群組 — 若是 combo 自動建立的,連動刪同群組其他筆
   const groupMembers = rec ? findComboGroupMembers(rec) : [];
   const isCombo = !!getComboGroupId(rec);
-  const totalCount = 1 + groupMembers.length;
-  const confirmMsg = isCombo
-    ? `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併刪除?\n班表將恢復為原始狀態。`
-    : '確定要刪除此筆紀錄?班表將恢復為原始狀態。';
+  // 偵測「普通換班配對」(swap mode 配對,5 秒內、互換 originalName)
+  let pairedSwap = null;
+  if(rec && rec.mode === 'swap' && !isCombo){
+    pairedSwap = (State.swaps || []).find(o =>
+      o !== rec &&
+      o.mode === 'swap' &&
+      o.branch === rec.branch &&
+      o.position === rec.position &&
+      o.originalName === (rec.swapWith && rec.swapWith[0]) &&
+      Array.isArray(o.swapWith) && o.swapWith[0] === rec.originalName &&
+      Math.abs(new Date(o.createdAt) - new Date(rec.createdAt)) < 5000
+    );
+  }
+  const extraMembers = isCombo ? groupMembers : (pairedSwap ? [pairedSwap] : []);
+  const totalCount = 1 + extraMembers.length;
+  let confirmMsg;
+  if(isCombo){
+    confirmMsg = `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併刪除?\n班表將恢復為原始狀態。`;
+  } else if(pairedSwap){
+    confirmMsg = `這是雙向換班,將同步刪除對方那筆 (${pairedSwap.date} ${pairedSwap.shift}班),確定?`;
+  } else {
+    confirmMsg = '確定要刪除此筆紀錄?班表將恢復為原始狀態。';
+  }
   if(!confirm(confirmMsg)) return;
   showLoading(`刪除中… (${totalCount} 筆)`);
-  // 先刪主紀錄,再刪同群組成員
+  // 先刪主紀錄,再刪關聯紀錄
   await api('deleteSwap', {id});
-  for(const m of groupMembers){
+  for(const m of extraMembers){
     if(m.id) await api('deleteSwap', {id: m.id});
   }
   await loadAllData();
   hideLoading();
-  toast(isCombo ? `已刪除 ${totalCount} 筆關聯紀錄` : '已刪除');
+  if(isCombo){
+    toast(`已刪除 ${totalCount} 筆關聯紀錄`);
+  } else if(pairedSwap){
+    toast(`已刪除雙向換班共 ${totalCount} 筆`);
+  } else {
+    toast('已刪除');
+  }
   renderRecords();
   if(State.currentBranch) renderBranch();
 }
