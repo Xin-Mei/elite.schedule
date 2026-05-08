@@ -1792,18 +1792,7 @@
     border-top:1px dashed currentColor;
     opacity:0.4;
   }
-  /* 兩段班 — 該段獨立的備註小字 */
-  .name-pill .split-seg-note{
-    display:block;
-    font-size:9px;
-    font-weight:400;
-    margin-top:2px;
-    line-height:1.2;
-    opacity:0.85;
-    word-break:break-word;
-    white-space:normal;
-    font-family:"Noto Sans TC", sans-serif;
-  }
+  /* (split-seg-note 已棄用 — 兩段班備註現合併到 cover-branch 同行顯示) */
 
   /* ========== Cell quick-action floating menu ========== */
   .cell-menu{
@@ -2245,8 +2234,14 @@
       <button class="btn" onclick="loadAllRecords()">↻ 重新載入</button>
     </div>
 
-    <!-- 篩選區:管理員可依員工/假別/院區/職位快速過濾 -->
+    <!-- 篩選區:管理員可依員工/假別/院區/職位/月份快速過濾 -->
     <div class="records-filter-bar" id="recordsFilterBar">
+      <div class="rf-item">
+        <label>月份(統計用)</label>
+        <select id="rfMonth" onchange="renderRecords()">
+          <option value="">全部月份</option>
+        </select>
+      </div>
       <div class="rf-item">
         <label>員工(原本人員)</label>
         <select id="rfEmployee" onchange="renderRecords()">
@@ -3358,10 +3353,10 @@ async function loadAllData(){
     try{ State.schedules[key] = typeof row.data==='string'? JSON.parse(row.data): row.data; }catch(e){}
   });
   // ─── Unified record stream ─────────────────────────────────────────
-  // We have TWO source tables:
-  //   _換班紀錄 (swaps): for mode=swap | support
-  //   _請假紀錄 (leaves): for mode=leave (缺人/喪假/婚假/育嬰假/產假/產檢假/安胎假)
-  // Frontend treats them as one stream (State.swaps) for display & calculation.
+  // 三張來源 sheet,前端統合為單一 State.swaps 流:
+  //   _換班紀錄 (swaps):     mode=swap | support
+  //   _請假紀錄 (leaves):    mode=leave 的假別 (生理假/病假/喪假/婚假/育嬰/產假/產檢/安胎)
+  //   _缺人紀錄 (shortages): mode=leave + reason=缺人 (v5 起獨立成自己的 sheet,避免混淆請假)
   const normalize = s => {
     if(s.date instanceof Date) s.date = fmt(s.date);
     else if(typeof s.date === 'string' && s.date.indexOf('T')>0){
@@ -3373,7 +3368,6 @@ async function loadAllData(){
   // Convert leaves-sheet rows into swap-record shape
   const fromLeavesSheet = (res.data.leaves || []).map(l=>{
     const rec = normalize({...l});
-    // Old leave records may not have mode/originalName fields
     if(!rec.mode) rec.mode = 'leave';
     if(!rec.originalName && rec.name) rec.originalName = rec.name;
     if(!rec.coverName && rec.cover) rec.coverName = rec.cover;
@@ -3382,9 +3376,17 @@ async function loadAllData(){
     }
     return rec;
   });
-  State.swaps = [...fromSwapsSheet, ...fromLeavesSheet];
+  // Shortages sheet (新):僅 mode=leave + reason=缺人
+  const fromShortagesSheet = (res.data.shortages || []).map(s=>{
+    const rec = normalize({...s});
+    if(!rec.mode) rec.mode = 'leave';
+    if(!rec.reason) rec.reason = '缺人';
+    return rec;
+  });
+  State.swaps = [...fromSwapsSheet, ...fromLeavesSheet, ...fromShortagesSheet];
   // Keep raw State.leaves for legacy compatibility
   State.leaves = res.data.leaves || [];
+  State.shortages = res.data.shortages || [];
   // Global 8-week periods (shared across all branches, maintained in Sheet)
   State.globalPeriods = (res.data.globalPeriods || []).map(p=>{
     let sd = p.startDate;
@@ -4543,7 +4545,7 @@ function renderScheduleTable(setting, period){
   // Otherwise: 早 + (午 if needed) + 晚.
   let shiftRows;
   if(hasAttendance){
-    shiftRows = [{key:'attendance', label:'出勤', display:'出勤 (12HR)'}];
+    shiftRows = [{key:'attendance', label:'出勤', display:'出勤'}];
   } else if(hasNoon){
     shiftRows = [{key:'morning', label:'早'},{key:'noon', label:'午'},{key:'evening', label:'晚'}];
   } else {
@@ -4624,20 +4626,25 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         pillContent = (swap.swapWith && swap.swapWith[0]) || n;
         modeClass = 'mode-swap';
       } else if(splitCovers){
-        // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區 + 該段備註)
+        // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區+備註)
         // 隱私規則:leave 模式 (兩段班一定屬於 leave) 的備註只給管理員看
         const canSeeSegNote = isAdmin || swap.mode === 'support';
         pillContent = splitCovers.map((c, i) => {
-          const branchHtml = c.branch ? `<span class="cover-branch">${c.branch}</span>` : '';
           const sep = i > 0 ? '<span class="split-sep">／</span>' : '';
-          // 該段備註(僅有權限者可見)
-          let segNoteHtml = '';
+          // 院區與該段備註合併到同一行 (如「鶯歌 · DR16」), 字體大小一致
+          let metaText = '';
           const segNoteText = String(c.note || '').trim();
-          if(segNoteText && canSeeSegNote){
-            const safe = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            segNoteHtml = `<span class="split-seg-note">${safe}</span>`;
+          const branchText = String(c.branch || '').trim();
+          if(branchText && segNoteText && canSeeSegNote){
+            const safeNote = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            metaText = `${branchText} · ${safeNote}`;
+          } else if(branchText){
+            metaText = branchText;
+          } else if(segNoteText && canSeeSegNote){
+            metaText = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           }
-          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${branchHtml}${segNoteHtml}`;
+          const metaHtml = metaText ? `<span class="cover-branch">${metaText}</span>` : '';
+          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${metaHtml}`;
         }).join('');
         modeClass = (swap.mode === 'support') ? 'mode-support' : 'mode-leave';
       } else if(swap.mode === 'support'){
@@ -6624,41 +6631,97 @@ function renderRecords(){
   populateFilter('rfBranch',   swaps.map(r => r.branch));
   populateFilter('rfPosition', swaps.map(r => r.position));
 
+  // ─── 月份下拉填充 (從現有資料抽出 YYYY-MM,desc 排序最新優先) ──
+  const populateMonthFilter = () => {
+    const sel = $('rfMonth');
+    if(!sel) return;
+    const cur = sel.value;
+    const months = swaps.map(r => {
+      const d = String(r.date || '').trim();
+      const m = d.match(/^(\d{4})-(\d{2})/);
+      return m ? `${m[1]}-${m[2]}` : null;
+    }).filter(Boolean);
+    const uniqMonths = Array.from(new Set(months)).sort().reverse();
+    sel.innerHTML = `<option value="">全部月份</option>` +
+      uniqMonths.map(m => {
+        const [yr, mo] = m.split('-');
+        const label = `${yr} 年 ${parseInt(mo,10)} 月`;
+        return `<option value="${m}"${m===cur?' selected':''}>${label}</option>`;
+      }).join('');
+  };
+  populateMonthFilter();
+
   // ─── 2. 套用篩選條件 ───
+  const fMonth  = ($('rfMonth')    ? $('rfMonth').value    : '').trim();
   const fEmp    = ($('rfEmployee') ? $('rfEmployee').value : '').trim();
   const fReason = ($('rfReason')   ? $('rfReason').value   : '').trim();
   const fBranch = ($('rfBranch')   ? $('rfBranch').value   : '').trim();
   const fPos    = ($('rfPosition') ? $('rfPosition').value : '').trim();
+  const monthOf = (r) => {
+    const d = String(r.date || '').trim();
+    const m = d.match(/^(\d{4})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}` : '';
+  };
   const filtered = swaps.filter(r => {
+    if(fMonth  && monthOf(r) !== fMonth) return false;
     if(fEmp    && String(r.originalName||'') !== fEmp)    return false;
     if(fReason && String(r.reason||'')       !== fReason) return false;
     if(fBranch && String(r.branch||'')       !== fBranch) return false;
     if(fPos    && String(r.position||'')     !== fPos)    return false;
     return true;
   });
-  const hasFilter = !!(fEmp || fReason || fBranch || fPos);
+  const hasFilter = !!(fMonth || fEmp || fReason || fBranch || fPos);
 
-  // ─── 3. 統計卡 (依篩選後的資料,聚合 leave + support 類別) ───
-  const leaveStats = {};   // key = "name__reason" → {name, reason, count, branch, position}
+  // ─── 3. 統計卡 (改為月份統計 — 不選月份時就是「全部月份」聚合) ───
+  // key = "name__reason__YYYY-MM" → 在不選月份時把每個月分開顯示;選月份時則只看該月
+  const leaveStats = {};
   filtered.forEach(r=>{
     if(r.mode !== 'leave' && r.mode !== 'support') return;
-    const k = (r.originalName||'-') + '__' + (r.reason||'-');
-    if(!leaveStats[k]) leaveStats[k] = {name:r.originalName, reason:r.reason, count:0, branch:r.branch, position:r.position};
+    const ym = monthOf(r) || '無日期';
+    // 鍵的設計:有選月份時只用 name+reason 聚合;沒選時包含月份,讓統計卡按月分組
+    const k = fMonth
+      ? (r.originalName||'-') + '__' + (r.reason||'-')
+      : (r.originalName||'-') + '__' + (r.reason||'-') + '__' + ym;
+    if(!leaveStats[k]){
+      leaveStats[k] = {
+        name: r.originalName,
+        reason: r.reason,
+        count: 0,
+        branch: r.branch,
+        position: r.position,
+        month: ym
+      };
+    }
     leaveStats[k].count += 1;
   });
 
   let statsHtml = '';
-  const statEntries = Object.values(leaveStats).sort((a,b)=>b.count-a.count);
+  const statEntries = Object.values(leaveStats).sort((a,b)=>{
+    // 先按月份 desc,再按 count desc
+    if(a.month !== b.month) return (b.month || '').localeCompare(a.month || '');
+    return b.count - a.count;
+  });
   if(statEntries.length){
+    let titleSuffix = '';
+    if(fMonth){
+      const [yr, mo] = fMonth.split('-');
+      titleSuffix = ` <span style="font-size:13px; color:var(--teal-700); font-weight:600;">— ${yr} 年 ${parseInt(mo,10)} 月</span>`;
+    } else {
+      titleSuffix = ` <span style="font-size:12px; color:var(--muted); font-weight:400;">(全部月份,依月分組)</span>`;
+    }
     statsHtml = `<div class="records-stats">
-      <div class="records-stats-title">📊 請假/支援 統計${hasFilter ? ' <span style="font-size:12px; color:var(--muted); font-weight:400;">(依目前篩選)</span>' : ''}</div>
+      <div class="records-stats-title">📊 請假/支援 統計${titleSuffix}</div>
       <div class="records-stats-grid">
         ${statEntries.map(s=>{
           const isSupport = s.reason === '私事支援';
           const bg = isSupport ? '#fef3c7' : '#fde6e6';
           const fg = isSupport ? '#7a5a0e' : '#a83838';
+          // 不選月份時每張卡都顯示自己的月份
+          const monthLabel = !fMonth && s.month && s.month !== '無日期'
+            ? (() => { const [y,m] = s.month.split('-'); return `${parseInt(m,10)} 月`; })()
+            : '';
           return `<div class="stat-card" style="background:${bg};">
-            <div class="stat-label" style="color:${fg};">${s.reason}</div>
+            <div class="stat-label" style="color:${fg};">${s.reason}${monthLabel ? ` <span style="font-size:11px; opacity:0.7;">· ${monthLabel}</span>` : ''}</div>
             <div class="stat-name">${s.name||'-'}</div>
             <div class="stat-value" style="color:${fg};">${s.count}<span class="stat-unit">天</span></div>
             <div class="stat-meta">${s.branch} · ${s.position}</div>
@@ -6758,7 +6821,7 @@ async function loadAllRecords(){
 
 // 重置篩選下拉,然後重渲染
 function resetRecordsFilter(){
-  ['rfEmployee','rfReason','rfBranch','rfPosition'].forEach(id => {
+  ['rfMonth','rfEmployee','rfReason','rfBranch','rfPosition'].forEach(id => {
     const sel = $(id);
     if(sel) sel.value = '';
   });
@@ -6946,16 +7009,25 @@ async function downloadA4(){
               displayHtml = (swap.swapWith && swap.swapWith[0]) || n;
               bg = '#dcd9d0'; fg = '#2a2a2a';
             } else if(isSplit){
-              // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區 + 該段備註)
+              // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區+備註合併同行)
               displayHtml = swap.swapWith.map((c, i) => {
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
-                const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
                 const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                // 院區 + 備註合併同一行 (同字體大小)
+                const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
-                const segNoteHtml = segNote
-                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.85; margin-top:1px; line-height:1.2;">${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                let metaText = '';
+                if(branchText && segNote){
+                  metaText = `${branchText} · ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                } else if(branchText){
+                  metaText = branchText;
+                } else if(segNote){
+                  metaText = segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                }
+                const metaHtml = metaText
+                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${metaText}</span>`
                   : '';
-                return `${sep}${periodHtml}${c.name||''}${branchHtml}${segNoteHtml}`;
+                return `${sep}${periodHtml}${c.name||''}${metaHtml}`;
               }).join('');
               if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
@@ -7234,13 +7306,22 @@ async function downloadA4PartTime(){
               // 兩段班 (理論上工讀不會出現,但保留通用渲染避免異常顯示)
               displayHtml = swap.swapWith.map((c, i) => {
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
-                const branchHtml = c.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${c.branch}</span>` : '';
                 const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                // 院區 + 備註合併同一行
+                const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
-                const segNoteHtml = segNote
-                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.85; margin-top:1px; line-height:1.2;">${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
+                let metaText = '';
+                if(branchText && segNote){
+                  metaText = `${branchText} · ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                } else if(branchText){
+                  metaText = branchText;
+                } else if(segNote){
+                  metaText = segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                }
+                const metaHtml = metaText
+                  ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${metaText}</span>`
                   : '';
-                return `${sep}${periodHtml}${c.name||''}${branchHtml}${segNoteHtml}`;
+                return `${sep}${periodHtml}${c.name||''}${metaHtml}`;
               }).join('');
               if(swap.mode === 'support'){ bg = '#fef3c7'; fg = '#5e4914'; }
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
