@@ -3184,7 +3184,7 @@ const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxO4zpnhn-eM
 
 const State = {
   webAppUrl: localStorage.getItem('elite_webapp_url') || DEFAULT_WEBAPP_URL,
-  user: JSON.parse(localStorage.getItem('elite_user') || 'null') || {account:'', name:'', role:''},
+  user: JSON.parse(sessionStorage.getItem('elite_user') || 'null') || {account:'', name:'', role:''},
   currentBranch: null,
   currentPosition: '櫃台',
   currentPeriodIndex: 0,
@@ -5138,7 +5138,7 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         // 私事支援:顯示代班人姓名,院區+備註合併到同一行(同字體大小)
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
-        const noteForLine = String(swap.note || '').trim();
+        const noteForLine = getCleanNote(swap);
         const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
         if(meta){
           const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -5149,7 +5149,7 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         // 缺人 + 各種假別:紅底 + 代班人姓名,院區+備註合併到同一行
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
-        const noteForLine = String(swap.note || '').trim();
+        const noteForLine = getCleanNote(swap);
         const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
         if(meta){
           const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -5164,7 +5164,7 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       //   • 兩段班的備註已在分段中顯示,此處不重複
       //   • 假別文字(缺人/產檢等)依然不顯示在排班表上;要看請至「班別異動記錄」分頁
       // (注:單一代班備註已併入 pillContent 的 cover-branch span,所以這裡 noteHtml 永遠空)
-      const noteText = String(swap.note || '').trim();
+      const noteText = getCleanNote(swap);
       const noteHtml = '';
       // (不再以 swap.reason 作為 fallback 顯示假別文字 — 排班表上一律不顯示假別)
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
@@ -5332,6 +5332,30 @@ function isPendingApplication(r){
   return false;
 }
 
+// ─── Combo group (換班+代班) 工具 ───────────────────────────────────
+// combo 建立的 3 筆紀錄會在 note 開頭加上 "[CG:時間戳]" 標記,
+// 用於後續取消設定時連動刪除同群組紀錄。
+
+// 從 record 的 note 中提取 combo group id (若有)
+function getComboGroupId(rec){
+  if(!rec || !rec.note) return null;
+  const m = String(rec.note).match(/^\[CG:(\d+)\]/);
+  return m ? ('CG:' + m[1]) : null;
+}
+
+// 取得 record 的「使用者實際備註」(剝除 CG 標記)
+function getCleanNote(rec){
+  if(!rec || !rec.note) return '';
+  return String(rec.note).replace(/^\[CG:\d+\]\s*/, '').trim();
+}
+
+// 找出與 rec 同一個 combo 群組的所有其他紀錄
+function findComboGroupMembers(rec){
+  const cg = getComboGroupId(rec);
+  if(!cg) return [];
+  return (State.swaps || []).filter(s => s !== rec && getComboGroupId(s) === cg);
+}
+
 function openSwapModal(date, shift, name){
   _swapCtx = {date, shift, name, existingId: null};
 
@@ -5403,7 +5427,7 @@ function openSwapModal(date, shift, name){
     // Pre-fill form with existing values
     _swapCtx.existingId = existing.id;
     $('swapReason').value = existing.reason || '換班';
-    $('swapNote').value = existing.note || '';
+    $('swapNote').value = getCleanNote(existing);
     if(existing.mode === 'swap'){
       const sw = existing.swapWith || [];
       if(sw[0]){
@@ -6217,24 +6241,32 @@ async function restoreOriginalSwap(){
     closeModal('swapModal');
     return;
   }
-  if(!confirm('確定要取消此換班/支援設定,還原為原排班?')) return;
 
   const id = _swapCtx.existingId;
   const idStr = String(id);
+  // 找到該紀錄
+  const target = (State.swaps || []).find(s => String(s.id) === idStr);
+  // 偵測是否屬於 combo 群組(換班+代班 自動建立的 3 筆)
+  const groupMembers = target ? findComboGroupMembers(target) : [];
+  const isCombo = !!getComboGroupId(target);
+  const totalCount = 1 + groupMembers.length;
+  const confirmMsg = isCombo
+    ? `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併取消?`
+    : '確定要取消此換班/支援設定,還原為原排班?';
+  if(!confirm(confirmMsg)) return;
 
-  // 從 State.swaps 中先把這筆紀錄移除 (確保畫面立刻反映)
-  const idx = (State.swaps || []).findIndex(s => String(s.id) === idStr);
-  const removed = idx >= 0 ? State.swaps.splice(idx, 1)[0] : null;
-
-  // 判定:
-  //   ① 紀錄是 STMP 開頭 → 本地暫存,從未進過 sheet → 不需呼叫 API
-  //   ② 紀錄是 S/L 開頭   → 已存在於 sheet → 加入 pendingDeletions,留待批次儲存
-  //   ③ removed 為空      → 可能是更舊的格式 → 仍嘗試一次 deleteSwap
-  const isLocalOnly = idStr.startsWith('STMP');
-  if(!isLocalOnly){
-    State.pendingDeletions = State.pendingDeletions || [];
-    if(!State.pendingDeletions.includes(id)) State.pendingDeletions.push(id);
-  }
+  // 從 State.swaps 中移除目標 + combo 群組成員
+  const toRemove = [target, ...groupMembers].filter(Boolean);
+  toRemove.forEach(rec => {
+    const idx = (State.swaps || []).findIndex(s => s === rec);
+    if(idx >= 0) State.swaps.splice(idx, 1);
+    // 已存在於 sheet 的 (S/L/X 開頭) 加入 pendingDeletions;STMP 開頭只是本地暫存
+    const rid = String(rec.id || '');
+    if(!rid.startsWith('STMP') && rid){
+      State.pendingDeletions = State.pendingDeletions || [];
+      if(!State.pendingDeletions.includes(rec.id)) State.pendingDeletions.push(rec.id);
+    }
+  });
 
   closeModal('swapModal');
 
@@ -6244,7 +6276,15 @@ async function restoreOriginalSwap(){
   if(document.getElementById('homeRecords') && document.getElementById('homeRecords').style.display !== 'none'){
     renderRecords();
   }
-  toast(isLocalOnly ? '已還原 (本地暫存,未送至 Sheet)' : '已還原 (待儲存)');
+  // toast 訊息 — combo 顯示一併取消的筆數
+  const allLocalOnly = toRemove.every(r => String(r.id || '').startsWith('STMP'));
+  if(isCombo){
+    toast(allLocalOnly
+      ? `已取消「換班+代班」共 ${totalCount} 筆 (本地暫存,未送至 Sheet)`
+      : `已取消「換班+代班」共 ${totalCount} 筆 (待儲存)`);
+  } else {
+    toast(allLocalOnly ? '已還原 (本地暫存,未送至 Sheet)' : '已還原 (待儲存)');
+  }
 }
 
 function syncSwapCover(srcEl){
@@ -6392,8 +6432,11 @@ async function submitSwap(){
     const coverFull = `${coverNameRaw} (${coverBranch})`;
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
+    // combo 群組識別碼:同群組 3 筆共用,以利 restoreOriginalSwap 一併取消
+    // 寫入 note 開頭(後續顯示時過濾掉),例:"[CG:1731234567890] 使用者實際備註"
+    const comboGroupId = 'CG:' + baseTime;
+    const comboTag = `[${comboGroupId}]`;
     // Rec 1: 本班(原員工 → partner) — mode=swap
-    // note 留空(換班 cell 不顯示 note;若使用者有填備註,留給 Rec3 用即可)
     const rec1 = {
       id: 'STMP' + baseTime + Math.floor(Math.random()*100),
       branch: State.currentBranch,
@@ -6405,7 +6448,7 @@ async function submitSwap(){
       mode: 'swap',
       swapWith: [partner],
       coverName: '',
-      note: '',
+      note: comboTag,
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
@@ -6421,12 +6464,12 @@ async function submitSwap(){
       mode: 'swap',
       swapWith: [_swapCtx.name],
       coverName: '',
-      note: '',
+      note: comboTag,
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
     // Rec 3: 本班 partner 缺人/支援/假別,由代班人員代 — 依使用者選的第二段原因
-    // note 只存使用者輸入的備註(空也 OK),避免 cell 顯示「[換班+代班] 由 ... 代班」這類自動字串
+    // note 開頭含 comboGroupId 標記,後接使用者實際輸入備註
     const rec3 = {
       id: 'STMP' + (baseTime+2) + Math.floor(Math.random()*100),
       branch: State.currentBranch,
@@ -6438,7 +6481,7 @@ async function submitSwap(){
       mode: seg2Mode,
       swapWith: [],
       coverName: coverFull,
-      note: recNote,
+      note: recNote ? `${comboTag} ${recNote}` : comboTag,
       createdAt: sharedCreatedAt,
       _unsaved: true,
     };
@@ -7578,7 +7621,7 @@ function renderRecords(){
     }
     const noteCol = isSplitSwap(r)
       ? `<span style="color:var(--muted); font-size:12px;">(見左欄各段)</span>`
-      : (r.note || '—');
+      : (getCleanNote(r) || '—');
     html += `<div class="record-item${isPending?' pending':''}">
       <div><span class="type-tag" style="background:${modeBg}; color:${modeColor};">${r.reason}${isSplitSwap(r) ? ' · 兩段班' : ''}</span>${pendingTag}</div>
       <div>${r.branch}</div>
@@ -7631,12 +7674,23 @@ async function deleteSwap(id){
   if(recBranch && !canEditBranch(recBranch)){
     if(!requireEditPermission(recBranch)) return;
   }
-  if(!confirm('確定要刪除此筆紀錄?班表將恢復為原始狀態。')) return;
-  showLoading('刪除中…');
+  // 偵測 combo 群組 — 若是 combo 自動建立的,連動刪同群組其他筆
+  const groupMembers = rec ? findComboGroupMembers(rec) : [];
+  const isCombo = !!getComboGroupId(rec);
+  const totalCount = 1 + groupMembers.length;
+  const confirmMsg = isCombo
+    ? `這是「換班+代班」設定,共 ${totalCount} 筆關聯紀錄,確定一併刪除?\n班表將恢復為原始狀態。`
+    : '確定要刪除此筆紀錄?班表將恢復為原始狀態。';
+  if(!confirm(confirmMsg)) return;
+  showLoading(`刪除中… (${totalCount} 筆)`);
+  // 先刪主紀錄,再刪同群組成員
   await api('deleteSwap', {id});
+  for(const m of groupMembers){
+    if(m.id) await api('deleteSwap', {id: m.id});
+  }
   await loadAllData();
   hideLoading();
-  toast('已刪除');
+  toast(isCombo ? `已刪除 ${totalCount} 筆關聯紀錄` : '已刪除');
   renderRecords();
   if(State.currentBranch) renderBranch();
 }
@@ -7867,14 +7921,14 @@ async function downloadA4(){
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
-              const noteForLine = String(swap.note || '').trim();
+              const noteForLine = getCleanNote(swap);
               const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
               const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
               displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';   // 柔和的暖黃
             } else {
               const cv = parseCover(swap.coverName || n);
-              const noteForLine = String(swap.note || '').trim();
+              const noteForLine = getCleanNote(swap);
               const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
               const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
               displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
@@ -8160,14 +8214,14 @@ async function downloadA4PartTime(){
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
-              const noteForLine = String(swap.note || '').trim();
+              const noteForLine = getCleanNote(swap);
               const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
               const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
               displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';
             } else {
               const cv = parseCover(swap.coverName || n);
-              const noteForLine = String(swap.note || '').trim();
+              const noteForLine = getCleanNote(swap);
               const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
               const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
               displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
@@ -8452,7 +8506,7 @@ async function doEmployeeLogin(){
       name: '系統管理員',
       role: 'admin'
     };
-    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    sessionStorage.setItem('elite_user', JSON.stringify(State.user));
     sessionStorage.removeItem('elite_emp');
     applyRole();
     closeEmployeeGate();
@@ -8477,17 +8531,17 @@ async function doEmployeeLogin(){
   // Branch on role returned by backend
   const u = res.user || {};
   if(u.role === 'admin'){
-    // Admin login path — persistent in localStorage
+    // Admin login path — sessionStorage (分頁關閉自動登出)
     State.user = {
       account: u.account || u.employeeId || id,
       name: u.name || '系統管理員',
       role: 'admin'
     };
-    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    sessionStorage.setItem('elite_user', JSON.stringify(State.user));
     // Clear any prior employee session (they're using admin now)
     sessionStorage.removeItem('elite_emp');
   } else if(u.role === 'manager'){
-    // Manager login path — persistent in localStorage (跟 admin 同等待遇,但限制院區)
+    // Manager login path — sessionStorage (跟 admin 同等待遇,但限制院區;分頁關閉自動登出)
     // branch 欄位由後端帶來,內含可管理院區字串 (例如「三樹,土城」)
     State.user = {
       account: u.account || u.employeeId || id,
@@ -8495,10 +8549,10 @@ async function doEmployeeLogin(){
       role: 'manager',
       branch: String(u.branch || '')   // 保留可管理院區清單,前端會 split 解析
     };
-    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    sessionStorage.setItem('elite_user', JSON.stringify(State.user));
     sessionStorage.removeItem('elite_emp');
   } else {
-    // Employee login path — sessionStorage only (must re-login next browser session)
+    // Employee login path — sessionStorage (分頁關閉自動登出 — 與 admin/manager 一致)
     State.user = {
       employeeId: u.employeeId || id,
       name: u.name || id,
@@ -8514,7 +8568,7 @@ async function doEmployeeLogin(){
       }));
     } catch(_){}
     // Clear any prior admin session (they're using employee now)
-    localStorage.removeItem('elite_user');
+    sessionStorage.removeItem('elite_user');
   }
 
   applyRole();
@@ -8549,16 +8603,17 @@ function openEmployeeGate(){
 
 // Check if a session is still valid (admin in localStorage OR employee in sessionStorage)
 function restoreSession(){
-  // 1) Try admin / manager session (persistent across browser sessions)
+  // 全部角色(admin/manager/employee)皆從 sessionStorage 還原 — 分頁關閉即失效
+  // 1) Try admin / manager session
   try {
-    const savedAdmin = JSON.parse(localStorage.getItem('elite_user') || 'null');
+    const savedAdmin = JSON.parse(sessionStorage.getItem('elite_user') || 'null');
     if(savedAdmin && (savedAdmin.role === 'admin' || savedAdmin.role === 'manager') && savedAdmin.account){
       State.user = savedAdmin;
       return true;
     }
   } catch(_){}
 
-  // 2) Try employee session (this-browser-tab only)
+  // 2) Try employee session
   try {
     const savedEmp = JSON.parse(sessionStorage.getItem('elite_emp') || 'null');
     if(savedEmp && savedEmp.employeeId){
@@ -8611,7 +8666,7 @@ async function doAdminLogin(){
     return;
   }
   State.user = {account: res.user.account || account, name: res.user.name, role: 'admin'};
-  localStorage.setItem('elite_user', JSON.stringify(State.user));
+  sessionStorage.setItem('elite_user', JSON.stringify(State.user));
   sessionStorage.removeItem('elite_emp');
   applyRole();
   closeModal('adminLoginModal');
@@ -8627,7 +8682,7 @@ function doLogout(){
   if(!confirm(`確定要登出${label}身分?`)) return;
 
   // Clear both stores so the next visit definitely shows the gate
-  localStorage.removeItem('elite_user');
+  sessionStorage.removeItem('elite_user');
   sessionStorage.removeItem('elite_emp');
   State.user = {account:'', name:'', role:'guest'};
   applyRole();
@@ -8664,7 +8719,11 @@ document.addEventListener('click', (e)=>{
    INIT
    ===================================================================== */
 async function init(){
-  // Restore prior session (admin from localStorage or employee from sessionStorage)
+  // 一次性清理:把舊版本可能留在 localStorage 中的 elite_user 移除
+  // (從這版起,登入狀態改存 sessionStorage — 分頁關閉自動登出)
+  try { localStorage.removeItem('elite_user'); } catch(_) {}
+
+  // Restore prior session (admin/manager/employee — 全部改用 sessionStorage)
   const restored = restoreSession();
 
   if(restored){
