@@ -2770,7 +2770,14 @@
               <input type="text" id="comboCoverName" placeholder="如:王小美"/>
             </div>
           </div>
-          <div style="font-size:13px; color:var(--muted); margin-top:6px; padding:8px 12px; background:#f4f1e8; border-radius:6px;">
+          <div class="form-row" style="margin-top:8px; margin-bottom:0;">
+            <label>備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+            <input type="text" id="comboNote" placeholder="如:DR16"/>
+            <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+              排班表中代班人員姓名 (院區) 後方會顯示此備註
+            </div>
+          </div>
+          <div style="font-size:13px; color:var(--muted); margin-top:8px; padding:8px 12px; background:#f4f1e8; border-radius:6px;">
             💡 系統會自動建立 3 筆紀錄:換班雙向兩筆 + 第二段紀錄一筆。<br>
             原員工不影響上班日,對方因第二段原因字卡將顯示 −1。
           </div>
@@ -5421,6 +5428,7 @@ function openSwapModal(date, shift, name){
   if($('comboPartnerDate')) $('comboPartnerDate').value = '';
   if($('comboCoverName')) $('comboCoverName').value = '';
   if($('comboCoverBranch')) $('comboCoverBranch').value = '';
+  if($('comboNote')) $('comboNote').value = '';
   if($('comboReason')) $('comboReason').value = '缺人';
 
   if(existing){
@@ -5584,6 +5592,7 @@ function populateComboBlock(){
   // 注意:comboPartnerShift 已由上方 innerHTML 設好預設(單 option 自動 selected),不要再清空
   $('comboPartnerDate').value = '';
   $('comboCoverName').value = '';
+  if($('comboNote')) $('comboNote').value = '';
   $('comboReason').value = '缺人';   // 預設「缺人」
   // partner 預設不勾任何;若使用者上一次選過 (combo 在 modal 開啟期間切走又切回),保留 hidden 值的話也要重 active
   const cur = $('comboPartner').value;
@@ -6350,6 +6359,20 @@ function applySwapModeUI(){
     populateComboBlock();
   }
 
+  // 底部共用備註欄 — combo 有自己的備註欄,所以隱藏共用的避免混淆
+  const noteRow = $('swapNoteRow');
+  if(noteRow){
+    // 兩段班勾選時也會隱藏 (見 onSwapSplitToggle),但 combo 切回 leave 後 onSwapSplitToggle 會自動處理
+    if(mode === 'combo'){
+      noteRow.style.display = 'none';
+    } else {
+      // 非 combo:讓 onSwapSplitToggle 決定 (兩段班時隱藏,否則顯示)
+      const cb = $('swapSplitToggle');
+      const splitChecked = cb && cb.checked;
+      noteRow.style.display = splitChecked ? 'none' : '';
+    }
+  }
+
   // Update color hint
   const hint = $('swapColorHint');
   if(mode==='swap'){ hint.textContent='送出後 → 班表顯示為灰底黑字';   hint.className='swap-color-hint h-gray'; }
@@ -6428,7 +6451,7 @@ async function submitSwap(){
         return;
       }
     }
-    const recNote = ($('swapNote').value || '').trim();
+    const recNote = ($('comboNote').value || '').trim();
     const coverFull = `${coverNameRaw} (${coverBranch})`;
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
