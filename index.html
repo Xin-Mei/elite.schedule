@@ -338,46 +338,47 @@
     font-weight:700;
     letter-spacing:3px;
     font-size:22px;
-    display:inline-flex; align-items:center; gap:4px;
-    position:relative;
+    display:inline-flex; align-items:center;
   }
-  /* 管理員可切換院區的下拉 — 外觀偽裝成原標題,但底下是 native select */
-  .crumb .branch-switch{
-    appearance:none; -webkit-appearance:none; -moz-appearance:none;
-    background:transparent;
-    border:none;
-    border-bottom:2px dashed transparent;
-    padding:2px 22px 2px 4px;
-    margin:0;
-    font:inherit;
-    color:inherit;
-    letter-spacing:inherit;
+  /* 管理員可切換院區的膠囊列 — 12 個院區並排 (放在 breadcrumb 中) */
+  .branch-pills{
+    display:inline-flex;
+    flex-wrap:wrap;
+    gap:6px;
+    align-items:center;
+  }
+  .branch-pill{
+    appearance:none;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--teal-800);
+    border-radius:999px;
+    padding:6px 14px;
+    font-family:"Noto Serif TC", serif;
+    font-size:15px;
+    letter-spacing:2px;
+    font-weight:500;
     cursor:pointer;
-    outline:none;
-    border-radius:6px;
     transition:all .15s ease;
-    /* 隱藏 select 的下三角預設樣式 */
-    text-overflow:ellipsis;
-    /* 確保至少能點到 */
-    min-width:120px;
-    box-sizing:border-box;
+    line-height:1.2;
   }
-  .crumb .branch-switch:hover{
+  .branch-pill:hover{
+    border-color:var(--teal-600);
+    color:var(--teal-900);
     background:var(--teal-50);
-    border-bottom-color:var(--teal-600);
   }
-  .crumb .branch-switch:focus{
-    background:var(--teal-50);
-    box-shadow:0 0 0 3px rgba(63,184,179,0.18);
+  .branch-pill.active{
+    background:var(--teal-700);
+    color:#fff;
+    border-color:var(--teal-700);
+    box-shadow:var(--shadow-sm);
+    font-weight:700;
+    cursor:default;
   }
-  .crumb .branch-switch-arrow{
-    position:absolute;
-    right:6px; top:50%;
-    transform:translateY(-50%);
-    font-size:14px;
-    color:var(--teal-700);
-    pointer-events:none;
-    opacity:0.7;
+  .branch-pill.active:hover{
+    /* active 狀態下不變更顏色 */
+    background:var(--teal-700);
+    color:#fff;
   }
 
   /* ========== Position selector ========== */
@@ -3635,19 +3636,16 @@ function openBranch(name){
   updateHash();
 }
 
-// 渲染麵包屑中的「院區名稱」— 管理員看到下拉(可直接切換),其他角色看純文字
+// 渲染麵包屑中的「院區名稱」— 管理員看到院區膠囊列(可一鍵切換),其他角色看純文字
 function renderBranchTitle(){
   const el = $('branchTitle');
   if(!el) return;
   const isAdmin = State.user && State.user.role === 'admin';
   const cur = State.currentBranch || '';
   if(isAdmin){
-    el.innerHTML = `
-      <select class="branch-switch" onchange="switchBranch(this.value)" title="切換院區">
-        ${BRANCHES.map(b => `<option value="${b}"${b===cur?' selected':''}>${b} 院區</option>`).join('')}
-      </select>
-      <span class="branch-switch-arrow" aria-hidden="true">▾</span>
-    `;
+    el.innerHTML = `<div class="branch-pills">
+      ${BRANCHES.map(b => `<button class="branch-pill${b===cur?' active':''}" onclick="switchBranch('${b}')" title="切換到 ${b} 院區">${b}</button>`).join('')}
+    </div>`;
   } else {
     el.textContent = cur + ' 院區';
   }
@@ -4125,7 +4123,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </div>
   `;
 
-  let html = staffPoolHtml + hoursTableHtml + bulkToolbarHtml + `<table class="schedule"><thead><tr>
+  let html = hoursTableHtml + bulkToolbarHtml + staffPoolHtml + `<table class="schedule"><thead><tr>
     <th class="shift">班</th>
     ${WEEKDAY_LABELS.map(w=>`<th>${w}</th>`).join('')}
   </tr></thead><tbody>`;
@@ -6884,8 +6882,25 @@ async function saveSettings(){
     toast('儲存失敗:'+(res.error||'未知錯誤'),'error');
     return;
   }
+
+  // ── Optimistic local update ────────────────────────────────────────
+  // 直接把剛剛送出去的 s 寫回 State.settings,確保畫面立刻反映變更
+  // (不依賴 loadAllData 的回傳;若 loadAllData 因網路時差或 cache 拿到舊值,
+  //  這份 deep clone 會在後面被覆蓋 → 我們在 loadAllData 後再用同一份 s 覆寫一次,
+  //  確保即時更新,跟重新整理頁面一致)
+  const branchKey = State.currentBranch;
+  const sSnapshot = JSON.parse(JSON.stringify(s));
+  if(!State.settings[branchKey]) State.settings[branchKey] = {};
+  State.settings[branchKey][pos] = sSnapshot;
+
   // Re-load all data so the saved JSON round-trips and any normalization is reflected
   await loadAllData();
+
+  // 再次強制覆寫 — loadAllData 可能因 sheet 寫入時差讀到舊值,
+  // 用本機 snapshot 蓋過去,使排班表 baseWork 等計算立即反映新區間
+  if(!State.settings[branchKey]) State.settings[branchKey] = {};
+  State.settings[branchKey][pos] = sSnapshot;
+
   hideLoading();
   toast('設定已儲存');
   closeModal('settingsModal');
