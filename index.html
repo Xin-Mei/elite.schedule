@@ -4712,9 +4712,23 @@ function renderSummary(setting, period){
       offAdjustments[orig].leaveDays += 1;
       if(grp && offAdjByGroup[grp]) offAdjByGroup[grp].leaveDays += 1;
     } else if(s.mode === 'swap'){
-      // For 換班: original effectively off this day, swap-target works this day
-      // The net depends on whether the target was already working that day or off.
-      // We calculate exactly by checking the schedule.
+      // 特殊情境:**同日早晚互換** (A 的早班 ↔ 畇筑的晚班,且都在同一天)
+      // → 兩人當天上班數仍各為 1,工時整體中性,**不顯示警示**(維持 1 換 1 規則)
+      // 偵測方式:在 swaps 中找有沒有「成對的另一筆」— 同日、方向相反、createdAt 接近
+      const partnerName = (s.swapWith || [])[0];
+      const pairedSameDay = partnerName && swaps.find(o =>
+        o !== s &&
+        o.mode === 'swap' &&
+        o.date === s.date &&             // 同日
+        o.originalName === partnerName && // 對方
+        Array.isArray(o.swapWith) && o.swapWith[0] === orig &&  // 方向相反
+        Math.abs(new Date(o.createdAt) - new Date(s.createdAt)) < 5000  // 同批次
+      );
+      if(pairedSameDay){
+        // 同日早晚互換 — 不調整 swapNetWorkDelta (兩筆紀錄都會走到此分支,都不動 delta)
+        return;
+      }
+      // 一般跨日換班:套用原有邏輯 — 視原排班與目標日期實際情況計算
       const cell = (sched.shifts||{})[s.date];
       const origWasWorking = cell && (
         (cell.morning||[]).includes(orig) ||
@@ -6413,7 +6427,18 @@ async function autoGenerate(){
       const ds = fmt(dt);
       const day = {morning:[], noon:[], evening:[], attendance:[], off:[]};
 
+      // ─── 依日期套用區間 (from/to) ────────────────────────────────
+      // 同組可能有多筆員工 (如「A」佔位無區間 + 「瑜軒」5/16~7/4),
+      // 用 getEffectiveEmployees 取「該日該組唯一有效的員工」,
+      // 自動排班才不會在區間外塞錯人 (例如瑜軒 5/16 才生效,5/11 應填「A」)。
+      // 對於每組,取出當天的有效員工;但 startIndex 仍以「該員工自己的設定」為準。
+      const dayEffEmps = getEffectiveEmployees(employees, ds);
+      // 取出每個 group 唯一一筆有效員工,放成 set 方便後面比對
+      const effSet = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
+
       employees.forEach(emp=>{
+        // 該員工今天若不是該組的有效員工 → 跳過 (會由同組其他員工接棒)
+        if(!effSet.has(emp.name)) return;
         // emp.startIndex applies to period 0; subsequent periods continue the cycle
         const cycPos = ((emp.startIndex - 1) + periodOffset + i) % pattern.length;
         const sym = pattern[cycPos];
