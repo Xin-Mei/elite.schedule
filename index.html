@@ -8142,6 +8142,17 @@ async function doEmployeeLogin(){
     localStorage.setItem('elite_user', JSON.stringify(State.user));
     // Clear any prior employee session (they're using admin now)
     sessionStorage.removeItem('elite_emp');
+  } else if(u.role === 'manager'){
+    // Manager login path — persistent in localStorage (跟 admin 同等待遇,但限制院區)
+    // branch 欄位由後端帶來,內含可管理院區字串 (例如「三樹,土城」)
+    State.user = {
+      account: u.account || u.employeeId || id,
+      name: u.name || '中階主管',
+      role: 'manager',
+      branch: String(u.branch || '')   // 保留可管理院區清單,前端會 split 解析
+    };
+    localStorage.setItem('elite_user', JSON.stringify(State.user));
+    sessionStorage.removeItem('elite_emp');
   } else {
     // Employee login path — sessionStorage only (must re-login next browser session)
     State.user = {
@@ -8194,10 +8205,10 @@ function openEmployeeGate(){
 
 // Check if a session is still valid (admin in localStorage OR employee in sessionStorage)
 function restoreSession(){
-  // 1) Try admin session (persistent across browser sessions)
+  // 1) Try admin / manager session (persistent across browser sessions)
   try {
     const savedAdmin = JSON.parse(localStorage.getItem('elite_user') || 'null');
-    if(savedAdmin && savedAdmin.role === 'admin' && savedAdmin.account){
+    if(savedAdmin && (savedAdmin.role === 'admin' || savedAdmin.role === 'manager') && savedAdmin.account){
       State.user = savedAdmin;
       return true;
     }
