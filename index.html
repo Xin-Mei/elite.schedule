@@ -2692,6 +2692,7 @@
           <button type="button" class="reason-pill admin-only-pill" data-reason="產假" data-mode="leave" onclick="selectReason('產假')">產　假</button>
           <button type="button" class="reason-pill admin-only-pill" data-reason="產檢假" data-mode="leave" onclick="selectReason('產檢假')">產檢假</button>
           <button type="button" class="reason-pill admin-only-pill" data-reason="安胎假" data-mode="leave" onclick="selectReason('安胎假')">安胎假</button>
+          <button type="button" class="reason-pill admin-only-pill" data-reason="教召" data-mode="leave" onclick="selectReason('教召')">教　召</button>
         </div>
       </div>
 
@@ -4671,23 +4672,45 @@ function renderSummary(setting, period){
   //   - mode='support': original off (+1 off day), cover gains nothing in summary (may not be employee)
   //   - mode='leave':   original off (+1 off day), cover NOT counted
 
-  const offAdjustments = {};   // empName → { netDays: +/- (in off-days), reasons: [...] }
-  const workAdjustments = {};  // empName → { added: [...] }
+  // ─── offAdjustments 設計 ─────────────────────────────────────────
+  // 為了正確處理「區間中員工換人」的情境:
+  //   • 同一組可能有兩位以上員工 (例如 A 組:瑜軒 to=5/31, 小華 from=6/1)
+  //   • swap 紀錄的 originalName 可能是「期間內任何時點的有效員工」
+  //   • 字卡顯示的 emp.name 卻是「期末日當下的有效員工」
+  // 為避免 leaveDays / swapNetWorkDelta 累在錯的 key 上,
+  // 我們**同時用姓名與組別**累積,字卡渲染時讀「該組整體」累積值。
+  const offAdjustments = {};       // empName → { leaveDays, swapNetWorkDelta }
+  const offAdjByGroup = {};        // group   → { leaveDays, swapNetWorkDelta } (合併該組所有員工)
+  const workAdjustments = {};      // empName → { added: [...] }
   setting.employees.forEach(e=>{
     if(!e.name) return;
     offAdjustments[e.name] = {netOffDelta: 0, leaveDays: 0, swapNetWorkDelta: 0};
+    if(!offAdjByGroup[e.group]) offAdjByGroup[e.group] = {leaveDays: 0, swapNetWorkDelta: 0};
   });
+
+  // 用 swap 紀錄找到「該日該員工屬於哪組」(考慮區間)
+  const groupOfNameOnDate = (name, dateStr) => {
+    if(!name) return null;
+    const dayEmps = getEffectiveEmployees(setting.employees, dateStr);
+    const hit = dayEmps.find(e => e.name === name);
+    if(hit) return hit.group;
+    // fallback:從全名單找(不分區間)
+    const hit2 = setting.employees.find(e => e.name === name);
+    return hit2 ? hit2.group : null;
+  };
 
   swaps.forEach(s=>{
     const orig = s.originalName;
     if(!offAdjustments[orig]) return; // employee no longer in this position
     // 缺人 — 不影響休假計算 (員工實際上還是要上班,只是缺另一位)
     if(s.reason === '缺人') return;
+    const grp = groupOfNameOnDate(orig, s.date);
     if(s.mode === 'support' || s.mode === 'leave'){
       // 私事支援 (support) 與各種假別 (leave) 處理相同:
       //   - 原員工該日視為休假,休假日 +1 天
       //   - 代班人 (coverName) 可能不在本院區員工名單中,故不計入本院區任何人的工時
       offAdjustments[orig].leaveDays += 1;
+      if(grp && offAdjByGroup[grp]) offAdjByGroup[grp].leaveDays += 1;
     } else if(s.mode === 'swap'){
       // For 換班: original effectively off this day, swap-target works this day
       // The net depends on whether the target was already working that day or off.
@@ -4702,6 +4725,7 @@ function renderSummary(setting, period){
       // After swap: original is off this day (if was working) → +1 off
       if(origWasWorking){
         offAdjustments[orig].swapNetWorkDelta -= 1; // -1 work = +1 off
+        if(grp && offAdjByGroup[grp]) offAdjByGroup[grp].swapNetWorkDelta -= 1;
         // For each swap target, if NOT already working that day → +1 work day for them
         (s.swapWith || []).forEach(name=>{
           if(!offAdjustments[name]) return; // not in this position
@@ -4713,6 +4737,8 @@ function renderSummary(setting, period){
           );
           if(!tgtWasWorking){
             offAdjustments[name].swapNetWorkDelta += 1; // -1 off
+            const tgtGrp = groupOfNameOnDate(name, s.date);
+            if(tgtGrp && offAdjByGroup[tgtGrp]) offAdjByGroup[tgtGrp].swapNetWorkDelta += 1;
           }
         });
       }
@@ -4749,7 +4775,9 @@ function renderSummary(setting, period){
       if((cell.evening||[]).includes(n)) baseWork++;
       if((cell.attendance||[]).includes(n)) baseWork++;
     }
-    const adj = (emp.name ? offAdjustments[emp.name] : null) || {leaveDays:0, swapNetWorkDelta:0};
+    // adj 改讀 group level 累積值 (整組 leaveDays / swapNetWorkDelta),
+    // 才能在「期間中換人」時依然正確顯示 (因為 swap 紀錄可能屬於該組的舊員工)
+    const adj = (offAdjByGroup[g]) || {leaveDays:0, swapNetWorkDelta:0};
 
     // 字卡顯示語意:上班日 (出勤格數)
     //   1 個格子 = 1 個上班日
@@ -5146,6 +5174,7 @@ const SWAP_REASONS = [
   {id:'產假',     label:'產　假',   mode:'leave',   color:'red',    desc:''},
   {id:'產檢假',   label:'產檢假',   mode:'leave',   color:'red',    desc:''},
   {id:'安胎假',   label:'安胎假',   mode:'leave',   color:'red',    desc:''},
+  {id:'教召',     label:'教　召',   mode:'leave',   color:'red',    desc:''},
 ];
 
 let _swapCtx = null; // {date, shift, name}
