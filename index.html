@@ -6028,8 +6028,11 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     // Build post-swap day cells for the affected dates
     // applicant gives away its slot at (date, shift)
     // partner gives away its slot at (targetDate, targetShift)
+    // 注意:當 date === targetDate (同日早晚互換),兩邊的 mutation 必須套用在同一份 cell 上,
+    //      否則會誤判為「早晚同人」(實際上是兩人對調,不是同人)
+    const sameDay = (date === targetDate);
     const sourceCell = JSON.parse(JSON.stringify(sched.shifts[date] || {}));
-    const targetCell = JSON.parse(JSON.stringify(sched.shifts[targetDate] || {}));
+    const targetCell = sameDay ? sourceCell : JSON.parse(JSON.stringify(sched.shifts[targetDate] || {}));
     // Find applicant's shift on source date
     const SHIFT_KEYS = ['morning','noon','evening','attendance'];
     const removeFrom = (cell, name) => {
@@ -6037,7 +6040,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
         if(cell[sk]) cell[sk] = cell[sk].filter(n => n !== name);
       });
     };
-    // Step a: source date — remove applicant, add partner (in same shift)
+    // Step a: source date — remove applicant, add partner (in applicant 原本的 shift)
     let appShiftKey = null;
     SHIFT_KEYS.forEach(sk=>{
       if((sched.shifts[date] && sched.shifts[date][sk] || []).includes(applicantName)){
@@ -6048,7 +6051,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
       removeFrom(sourceCell, applicantName);
       sourceCell[appShiftKey] = (sourceCell[appShiftKey] || []).concat([partnerName]);
     }
-    // Step b: target date — remove partner, add applicant
+    // Step b: target date — remove partner, add applicant (in partner 原本的 shift)
     let parShiftKey = null;
     SHIFT_KEYS.forEach(sk=>{
       if((sched.shifts[targetDate] && sched.shifts[targetDate][sk] || []).includes(partnerName)){
@@ -6060,6 +6063,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
       targetCell[parShiftKey] = (targetCell[parShiftKey] || []).concat([applicantName]);
     }
     // Check both cells for early+evening conflict (attendance excluded)
+    // sameDay 時 sourceCell === targetCell,只需檢查一次
     const checkConflict = (cell, ds) => {
       const morningSet = new Set((cell.morning || []).filter(Boolean));
       const conflict = (cell.evening || []).filter(n => morningSet.has(n));
@@ -6067,8 +6071,10 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     };
     const c1 = checkConflict(sourceCell, date);
     if(c1) return {ok:false, error:`${c1.ds} ${c1.name} 換班後早班與晚班為同一人 (${position}不允許)`};
-    const c2 = checkConflict(targetCell, targetDate);
-    if(c2) return {ok:false, error:`${c2.ds} ${c2.name} 換班後早班與晚班為同一人 (${position}不允許)`};
+    if(!sameDay){
+      const c2 = checkConflict(targetCell, targetDate);
+      if(c2) return {ok:false, error:`${c2.ds} ${c2.name} 換班後早班與晚班為同一人 (${position}不允許)`};
+    }
   }
 
   return {ok: true, workDays: {
