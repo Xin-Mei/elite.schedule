@@ -3678,6 +3678,28 @@ async function loadAllData(){
     return {startDate: sd};
   }).filter(p=>p.startDate);
 
+  // ─── 同步 globalPeriods 到各院區 setting (只加不刪) ───────────────────────
+  // 場景:管理員在 Sheet _工時區間 新增第 5 期,前台已存在的院區設定要自動跟上
+  // 規則:globalPeriods 中有但院區 setting.periods 沒有的 startDate → 自動加入並排序
+  //      院區 setting 中已存在的不動 (避免覆蓋管理員針對該院區的調整)
+  if(State.globalPeriods.length){
+    const globalSet = new Set(State.globalPeriods.map(p => p.startDate));
+    Object.keys(State.settings).forEach(branch => {
+      Object.keys(State.settings[branch] || {}).forEach(position => {
+        const s = State.settings[branch][position];
+        if(!s || !Array.isArray(s.periods)) return;
+        const existing = new Set(s.periods.map(p => p.startDate));
+        const missing = [...globalSet].filter(d => !existing.has(d));
+        if(missing.length){
+          missing.forEach(d => s.periods.push({startDate: d}));
+          // 依 startDate 升序排序,確保期數順序正確
+          s.periods.sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)));
+        }
+      });
+    });
+  }
+  // ─── End 同步 globalPeriods ─────────────────────────────────────────────
+
   // Global rotation patterns (shared per-position, maintained in Sheet _輪班循環)
   State.globalPatterns = (res.data.globalPatterns || []).filter(p=>p.position && p.pattern);
   try { localStorage.setItem('elite_globalPatterns', JSON.stringify(State.globalPatterns)); } catch(_){}
