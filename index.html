@@ -364,6 +364,66 @@
     box-shadow:var(--shadow-sm);
   }
 
+  /* 職位顯示控制 (齒輪 + 下拉面板) */
+  .pos-vis-wrap{position:relative; align-self:center;}
+  .pos-vis-btn{
+    width:42px; height:42px;
+    border-radius:50%;
+    background:#fff; border:1px solid var(--line);
+    color:var(--muted); font-size:18px;
+    cursor:pointer;
+    transition:all .2s ease;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .pos-vis-btn:hover{
+    border-color:var(--teal-600); color:var(--teal-800);
+    background:var(--teal-50);
+  }
+  .pos-vis-panel{
+    display:none;
+    position:absolute;
+    top:calc(100% + 8px); right:0;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    box-shadow:var(--shadow-md);
+    padding:14px 18px;
+    min-width:200px;
+    z-index:50;
+  }
+  .pos-vis-panel.show{display:block;}
+  .pos-vis-title{
+    font-family:'Noto Serif TC', serif;
+    font-weight:600; color:var(--teal-800);
+    letter-spacing:2px; font-size:14px;
+    margin-bottom:10px;
+    padding-bottom:6px;
+    border-bottom:1px solid var(--line);
+  }
+  .pos-vis-sub{
+    font-size:11px; color:var(--muted); font-weight:400; letter-spacing:1px;
+  }
+  .pos-vis-item{
+    display:flex; align-items:center; gap:8px;
+    padding:6px 4px;
+    cursor:pointer;
+    font-size:14px;
+    border-radius:6px;
+  }
+  .pos-vis-item:hover{background:var(--teal-50);}
+  .pos-vis-item input[type="checkbox"]{
+    width:auto; min-width:auto; margin:0;
+    cursor:pointer;
+  }
+  .pos-vis-hint{
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px dashed var(--line);
+    font-size:11px;
+    color:var(--muted);
+    line-height:1.5;
+  }
+
   /* ========== Action toolbar ========== */
   .action-toolbar{
     max-width:1400px; margin:0 auto;
@@ -915,6 +975,53 @@
   }
   @media (max-width: 720px){
     .records-filter-bar .rf-item{flex: 1 1 calc(50% - 6px);}
+  }
+
+  /* 分頁列 — 列表底下的上一頁/下一頁 + 跳頁 input */
+  .records-pager{
+    display:flex; align-items:center; justify-content:center;
+    gap:14px;
+    padding:18px 14px 6px;
+    flex-wrap:wrap;
+  }
+  .records-pager .pager-btn{
+    padding:8px 18px;
+    font-size:14px;
+  }
+  .records-pager .pager-btn[disabled]{
+    opacity:0.4;
+    cursor:not-allowed;
+  }
+  .records-pager .pager-info{
+    display:flex; align-items:center; gap:6px;
+    font-size:14px;
+    color:var(--ink);
+  }
+  .records-pager .pager-jump{
+    width:60px;
+    padding:6px 8px;
+    border-radius:6px;
+    border:1px solid var(--line);
+    text-align:center;
+    font-size:14px;
+    font-family:inherit;
+    box-sizing:border-box;
+    min-width:0;
+  }
+  .records-pager .pager-jump:focus{
+    outline:none; border-color:var(--teal-600);
+    box-shadow:0 0 0 2px rgba(63,184,179,0.18);
+  }
+  .records-pager .pager-meta{
+    color:var(--muted);
+    font-size:12px;
+    margin-left:6px;
+  }
+  .records-pager-meta{
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    padding:14px 0 6px;
   }
   .record-item{
     display:grid;
@@ -2238,31 +2345,31 @@
     <div class="records-filter-bar" id="recordsFilterBar">
       <div class="rf-item">
         <label>月份(統計用)</label>
-        <select id="rfMonth" onchange="renderRecords()">
+        <select id="rfMonth" onchange="onRecordsFilterChange()">
           <option value="">全部月份</option>
         </select>
       </div>
       <div class="rf-item">
         <label>員工(原本人員)</label>
-        <select id="rfEmployee" onchange="renderRecords()">
+        <select id="rfEmployee" onchange="onRecordsFilterChange()">
           <option value="">全部</option>
         </select>
       </div>
       <div class="rf-item">
         <label>原因/假別</label>
-        <select id="rfReason" onchange="renderRecords()">
+        <select id="rfReason" onchange="onRecordsFilterChange()">
           <option value="">全部</option>
         </select>
       </div>
       <div class="rf-item">
         <label>院區</label>
-        <select id="rfBranch" onchange="renderRecords()">
+        <select id="rfBranch" onchange="onRecordsFilterChange()">
           <option value="">全部</option>
         </select>
       </div>
       <div class="rf-item">
         <label>職位</label>
-        <select id="rfPosition" onchange="renderRecords()">
+        <select id="rfPosition" onchange="onRecordsFilterChange()">
           <option value="">全部</option>
         </select>
       </div>
@@ -3550,10 +3657,74 @@ function restoreFromHash(){
 /* =====================================================================
    POSITION BAR
    ===================================================================== */
+
+// 取得目前院區隱藏的職位列表
+function getHiddenPositions(){
+  const b = State.currentBranch || '';
+  if(!State.hiddenPositionsByBranch) State.hiddenPositionsByBranch = {};
+  if(!State.hiddenPositionsByBranch[b]){
+    // 從 localStorage 還原;若無則套用預設(減重櫃台預設隱藏 — 非全院區都有此職位)
+    let stored = null;
+    try {
+      const raw = localStorage.getItem('elite_hidden_positions_' + b);
+      if(raw) stored = JSON.parse(raw);
+    } catch(_){}
+    State.hiddenPositionsByBranch[b] = Array.isArray(stored) ? stored : ['減重櫃台'];
+  }
+  return State.hiddenPositionsByBranch[b];
+}
+
+// 寫入隱藏職位列表 (同步存到 localStorage)
+function setHiddenPositions(arr){
+  const b = State.currentBranch || '';
+  if(!State.hiddenPositionsByBranch) State.hiddenPositionsByBranch = {};
+  State.hiddenPositionsByBranch[b] = arr.slice();
+  try {
+    localStorage.setItem('elite_hidden_positions_' + b, JSON.stringify(arr));
+  } catch(_){}
+}
+
+function togglePositionVisibility(pos){
+  const hidden = getHiddenPositions().slice();
+  const idx = hidden.indexOf(pos);
+  if(idx >= 0){
+    hidden.splice(idx, 1);  // 取消隱藏
+  } else {
+    hidden.push(pos);  // 加入隱藏
+  }
+  setHiddenPositions(hidden);
+  // 若把當前職位隱藏掉,自動切到第一個可見的
+  if(State.currentPosition === pos && hidden.includes(pos)){
+    const firstVisible = POSITIONS.find(p => !hidden.includes(p));
+    if(firstVisible){
+      State.currentPosition = firstVisible;
+      State.currentPeriodIndex = 0;
+      updateHash();
+    }
+  }
+  renderPositionBar();
+  renderBranch();
+}
+
+// 切換職位顯示控制面板
+function togglePositionVisibilityPanel(){
+  const panel = $('positionVisibilityPanel');
+  if(!panel) return;
+  panel.classList.toggle('show');
+}
+
 function renderPositionBar(){
   const bar = $('positionBar');
   bar.innerHTML = '';
-  POSITIONS.forEach(p=>{
+  const hidden = getHiddenPositions();
+  const visiblePositions = POSITIONS.filter(p => !hidden.includes(p));
+
+  // 若當前職位被隱藏(例如剛從 hash 載入),自動跳到第一個可見的
+  if(visiblePositions.length && hidden.includes(State.currentPosition)){
+    State.currentPosition = visiblePositions[0];
+  }
+
+  visiblePositions.forEach(p=>{
     const btn = document.createElement('button');
     btn.className = 'pos-btn'+(p===State.currentPosition?' active':'');
     btn.textContent = p;
@@ -3566,6 +3737,28 @@ function renderPositionBar(){
     };
     bar.appendChild(btn);
   });
+
+  // 顯示/隱藏控制按鈕 (僅管理員可見)
+  const isAdmin = State.user && State.user.role === 'admin';
+  if(isAdmin){
+    const wrap = document.createElement('div');
+    wrap.className = 'pos-vis-wrap';
+    wrap.innerHTML = `
+      <button class="pos-vis-btn" onclick="togglePositionVisibilityPanel()" title="設定要顯示的職位">⚙</button>
+      <div class="pos-vis-panel" id="positionVisibilityPanel">
+        <div class="pos-vis-title">顯示職位 <span class="pos-vis-sub">(本院區)</span></div>
+        ${POSITIONS.map(p => {
+          const isHidden = hidden.includes(p);
+          return `<label class="pos-vis-item">
+            <input type="checkbox" ${isHidden?'':'checked'} onchange="togglePositionVisibility('${p}')"/>
+            <span>${p}</span>
+          </label>`;
+        }).join('')}
+        <div class="pos-vis-hint">取消勾選 = 該職位 tab 不顯示</div>
+      </div>
+    `;
+    bar.appendChild(wrap);
+  }
 }
 
 /* =====================================================================
@@ -3636,7 +3829,10 @@ function getCurrentSetting(){
   s.employees = (s.employees||[]).map(e=>({
     group: e.group || 'A',
     name: e.name || '',
-    startIndex: typeof e.startIndex==='number' ? e.startIndex : 1
+    startIndex: typeof e.startIndex==='number' ? e.startIndex : 1,
+    // 區間設定 (人員替換) — 留空 = 不限
+    from: e.from || '',
+    to:   e.to   || ''
   }));
   if(!s.periods || !s.periods.length){
     s.periods = [{ startDate: defaultPeriodStart() }];
@@ -4627,20 +4823,19 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         modeClass = 'mode-swap';
       } else if(splitCovers){
         // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區+備註)
-        // 隱私規則:leave 模式 (兩段班一定屬於 leave) 的備註只給管理員看
-        const canSeeSegNote = isAdmin || swap.mode === 'support';
+        // 備註(如 DR16)所有人都可見,與院區同字體大小、同行顯示
         pillContent = splitCovers.map((c, i) => {
           const sep = i > 0 ? '<span class="split-sep">／</span>' : '';
-          // 院區與該段備註合併到同一行 (如「鶯歌 · DR16」), 字體大小一致
+          // 院區與該段備註合併到同一行 (例「鶯歌 DR16」), 字體大小一致
           let metaText = '';
           const segNoteText = String(c.note || '').trim();
           const branchText = String(c.branch || '').trim();
-          if(branchText && segNoteText && canSeeSegNote){
+          if(branchText && segNoteText){
             const safeNote = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            metaText = `${branchText} · ${safeNote}`;
+            metaText = `${branchText} ${safeNote}`;
           } else if(branchText){
             metaText = branchText;
-          } else if(segNoteText && canSeeSegNote){
+          } else if(segNoteText){
             metaText = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           }
           const metaHtml = metaText ? `<span class="cover-branch">${metaText}</span>` : '';
@@ -4662,20 +4857,16 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       }
       // ─── 備註顯示 (取代原本的缺人/假別文字註記) ───────────────
       // 隱私規則:
-      //   • leave 模式 (請假) 的備註只給管理員看到,員工看不到
-      //   • 換班 / 私事支援 → 備註所有人都看得到
+      //   • 備註對所有人可見 (員工亦可見備註內容,例如「DR16」)
       //   • 兩段班的備註已在上方分段顯示,此處不重複輸出
-      //   • 不論是否管理員,排班表 cell 上「皆不顯示假別文字」(如缺人/產檢等)
+      //   • 假別文字(缺人/產檢等)依然不顯示在排班表上,要看假別請至「班別異動記錄」分頁
       const noteText = String(swap.note || '').trim();
       let noteHtml = '';
       if(noteText && !splitCovers){
-        const canSeeNote = isAdmin || swap.mode === 'swap' || swap.mode === 'support';
-        if(canSeeNote){
-          // 換行顯示在 pill 下方;HTML escape 以防備註內含特殊字元
-          const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                               .replace(/\n/g,'<br>');
-          noteHtml = `<span class="cell-note">${safe}</span>`;
-        }
+        // 換行顯示在 pill 下方;HTML escape 以防備註內含特殊字元
+        const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                             .replace(/\n/g,'<br>');
+        noteHtml = `<span class="cell-note">${safe}</span>`;
       }
       // (不再以 swap.reason 作為 fallback 顯示假別文字 — 排班表上一律不顯示假別)
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
@@ -6560,6 +6751,15 @@ async function saveSettings(){
     const i = +el.dataset.idx;
     if(s.employees[i]) s.employees[i].group = el.value;
   });
+  // 1b) Employee 區間設定 (from/to) — 防衛性收集,避免使用者沒讓日期欄位 blur 就按儲存
+  document.querySelectorAll('#employeeList input[data-field="from"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(s.employees[i]) s.employees[i].from = el.value || '';
+  });
+  document.querySelectorAll('#employeeList input[data-field="to"]').forEach(el=>{
+    const i = +el.dataset.idx;
+    if(s.employees[i]) s.employees[i].to = el.value || '';
+  });
   // 2) Cycle pattern values
   document.querySelectorAll('#cyclePattern select').forEach(el=>{
     const i = +el.dataset.idx;
@@ -6615,7 +6815,9 @@ function onPeriodChange(){
 
 function renderRecords(){
   const list = $('recordsList');
-  const swaps = (State.swaps||[]);
+  // ─── 重要:排除「換班」紀錄 — 換班只留存在 sheet,前台列表/統計不顯示 ───
+  // 若使用者從未來想要看換班,可在 sheet 中查詢;管理員只關心 leave + support
+  const swaps = (State.swaps || []).filter(r => r.mode !== 'swap');
 
   // ─── 1. 填充篩選下拉的選項 (從現有資料動態生成,保留使用者選擇) ───
   const populateFilter = (selId, allValues) => {
@@ -6672,13 +6874,12 @@ function renderRecords(){
   });
   const hasFilter = !!(fMonth || fEmp || fReason || fBranch || fPos);
 
-  // ─── 3. 統計卡 (改為月份統計 — 不選月份時就是「全部月份」聚合) ───
-  // key = "name__reason__YYYY-MM" → 在不選月份時把每個月分開顯示;選月份時則只看該月
+  // ─── 3. 統計卡 (僅 leave + support — 已在最上方排除 swap) ───
+  // key = "name__reason" 或 "name__reason__YYYY-MM" (依是否選月份)
   const leaveStats = {};
   filtered.forEach(r=>{
     if(r.mode !== 'leave' && r.mode !== 'support') return;
     const ym = monthOf(r) || '無日期';
-    // 鍵的設計:有選月份時只用 name+reason 聚合;沒選時包含月份,讓統計卡按月分組
     const k = fMonth
       ? (r.originalName||'-') + '__' + (r.reason||'-')
       : (r.originalName||'-') + '__' + (r.reason||'-') + '__' + ym;
@@ -6697,7 +6898,6 @@ function renderRecords(){
 
   let statsHtml = '';
   const statEntries = Object.values(leaveStats).sort((a,b)=>{
-    // 先按月份 desc,再按 count desc
     if(a.month !== b.month) return (b.month || '').localeCompare(a.month || '');
     return b.count - a.count;
   });
@@ -6716,7 +6916,6 @@ function renderRecords(){
           const isSupport = s.reason === '私事支援';
           const bg = isSupport ? '#fef3c7' : '#fde6e6';
           const fg = isSupport ? '#7a5a0e' : '#a83838';
-          // 不選月份時每張卡都顯示自己的月份
           const monthLabel = !fMonth && s.month && s.month !== '無日期'
             ? (() => { const [y,m] = s.month.split('-'); return `${parseInt(m,10)} 月`; })()
             : '';
@@ -6731,9 +6930,9 @@ function renderRecords(){
     </div>`;
   }
 
-  // ─── 4. 列表 (空態處理:沒任何紀錄 vs 篩選結果為空) ───
+  // ─── 4. 列表 (空態處理) ───
   if(!swaps.length){
-    list.innerHTML = `<div class="empty-state"><div class="ico">📋</div><div class="msg">尚無紀錄</div></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="ico">📋</div><div class="msg">尚無請假/支援紀錄</div></div>`;
     return;
   }
   if(!filtered.length){
@@ -6741,29 +6940,35 @@ function renderRecords(){
     return;
   }
 
-  let html = statsHtml + `<div class="record-item" style="background:var(--teal-50); font-size:13px; color:var(--muted); letter-spacing:1px; font-weight:600;">
-    <div>原因</div><div>院區</div><div>職位</div><div>原本人員</div><div>日期</div><div>班別</div><div>代班/換班對象</div><div>備註</div><div>操作</div>
-  </div>`;
-  const isAdmin = State.user.role === 'admin';
-  // 排序:pending 優先,接著依 createdAt desc
+  // ─── 5. 排序:pending 優先,接著 createdAt desc (新→舊) ───
   const sorted = filtered.slice().sort((a,b)=>{
     const ap = isPendingApplication(a) ? 0 : 1;
     const bp = isPendingApplication(b) ? 0 : 1;
     if(ap !== bp) return ap - bp;
     return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
-  sorted.forEach(r=>{
-    const modeColor = r.mode==='swap' ? '#3a3a3a'
-                    : r.mode==='support' ? '#7a5a0e'
-                    : '#a83838';
-    const modeBg = r.mode==='swap' ? '#e8e6df'
-                 : r.mode==='support' ? '#fef3c7'
-                 : '#fde6e6';
-    // 顯示對象:換班 → 換班員工;兩段班 → 兩段早/晚分列(含每段備註);其他 → coverName
+
+  // ─── 6. 分頁 (每頁 15 筆) ───
+  const PAGE_SIZE = 15;
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  if(typeof State.recordsPage !== 'number' || State.recordsPage < 1) State.recordsPage = 1;
+  if(State.recordsPage > totalPages) State.recordsPage = totalPages;
+  const pageStart = (State.recordsPage - 1) * PAGE_SIZE;
+  const pageItems = sorted.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // ─── 7. 列表 HTML ───
+  let html = statsHtml;
+  // 列表表頭
+  html += `<div class="record-item" style="background:var(--teal-50); font-size:13px; color:var(--muted); letter-spacing:1px; font-weight:600;">
+    <div>原因</div><div>院區</div><div>職位</div><div>原本人員</div><div>日期</div><div>班別</div><div>代班/換班對象</div><div>備註</div><div>操作</div>
+  </div>`;
+  const isAdmin = State.user.role === 'admin';
+  pageItems.forEach(r=>{
+    const modeColor = r.mode==='support' ? '#7a5a0e' : '#a83838';
+    const modeBg    = r.mode==='support' ? '#fef3c7' : '#fde6e6';
+    // 顯示對象:兩段班 → 兩段分列(含每段備註);其他 → coverName
     let target;
-    if(r.mode === 'swap'){
-      target = (r.swapWith||[]).join(' / ');
-    } else if(isSplitSwap(r)){
+    if(isSplitSwap(r)){
       target = r.swapWith.map(c => {
         const note = String(c.note || '').trim();
         const noteHtml = note ? ` <span style="color:var(--muted); font-size:12px;">[${note}]</span>` : '';
@@ -6784,7 +6989,6 @@ function renderRecords(){
         actionsHtml = `<button class="btn" style="padding:5px 10px; font-size:12px;" onclick="deleteSwap('${r.id}')">刪除</button>`;
       }
     }
-    // 兩段班的備註已在 target 欄分段顯示,獨立備註欄就顯示「— (見左)」
     const noteCol = isSplitSwap(r)
       ? `<span style="color:var(--muted); font-size:12px;">(見左欄各段)</span>`
       : (r.note || '—');
@@ -6800,7 +7004,37 @@ function renderRecords(){
       <div>${actionsHtml}</div>
     </div>`;
   });
+
+  // ─── 8. 分頁列 ───
+  if(totalPages > 1){
+    const cur = State.recordsPage;
+    const prevDis = cur <= 1 ? 'disabled' : '';
+    const nextDis = cur >= totalPages ? 'disabled' : '';
+    html += `<div class="records-pager">
+      <button class="btn pager-btn" ${prevDis} onclick="goRecordsPage(${cur-1})">← 上一頁</button>
+      <div class="pager-info">
+        第 <input type="number" class="pager-jump" min="1" max="${totalPages}" value="${cur}" onchange="goRecordsPage(parseInt(this.value,10)||1)" onkeydown="if(event.key==='Enter') goRecordsPage(parseInt(this.value,10)||1)"/>
+        / 共 <b>${totalPages}</b> 頁
+        <span class="pager-meta">(共 ${sorted.length} 筆,每頁 ${PAGE_SIZE} 筆)</span>
+      </div>
+      <button class="btn pager-btn" ${nextDis} onclick="goRecordsPage(${cur+1})">下一頁 →</button>
+    </div>`;
+  } else {
+    html += `<div class="records-pager-meta">共 ${sorted.length} 筆</div>`;
+  }
+
   list.innerHTML = html;
+}
+
+// 切換到指定頁碼後重新渲染 (供分頁列按鈕呼叫)
+function goRecordsPage(p){
+  const target = parseInt(p, 10);
+  if(isNaN(target) || target < 1) return;
+  State.recordsPage = target;
+  renderRecords();
+  // 滾動到列表頂端,讓使用者看到第一筆
+  const el = document.getElementById('recordsList');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 async function deleteSwap(id){
@@ -6819,12 +7053,19 @@ async function loadAllRecords(){
   renderRecords();
 }
 
+// 任何篩選條件變更時:重設到第 1 頁,然後重渲染
+function onRecordsFilterChange(){
+  State.recordsPage = 1;
+  renderRecords();
+}
+
 // 重置篩選下拉,然後重渲染
 function resetRecordsFilter(){
   ['rfMonth','rfEmployee','rfReason','rfBranch','rfPosition'].forEach(id => {
     const sel = $(id);
     if(sel) sel.value = '';
   });
+  State.recordsPage = 1;
   renderRecords();
 }
 
@@ -7018,7 +7259,7 @@ async function downloadA4(){
                 const segNote = String(c.note || '').trim();
                 let metaText = '';
                 if(branchText && segNote){
-                  metaText = `${branchText} · ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                  metaText = `${branchText} ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
                 } else if(branchText){
                   metaText = branchText;
                 } else if(segNote){
@@ -7312,7 +7553,7 @@ async function downloadA4PartTime(){
                 const segNote = String(c.note || '').trim();
                 let metaText = '';
                 if(branchText && segNote){
-                  metaText = `${branchText} · ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                  metaText = `${branchText} ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
                 } else if(branchText){
                   metaText = branchText;
                 } else if(segNote){
@@ -7720,6 +7961,16 @@ document.addEventListener('keydown', (e)=>{
   if(e.key==='Enter' && adminModal && adminModal.classList.contains('show')){
     doAdminLogin();
   }
+});
+
+// 點擊面板外時關閉職位顯示控制面板
+document.addEventListener('click', (e)=>{
+  const panel = document.getElementById('positionVisibilityPanel');
+  if(!panel || !panel.classList.contains('show')) return;
+  // 若點到 panel 自己 / 齒輪鈕 / 內部勾選框 → 不關閉
+  const wrap = panel.closest('.pos-vis-wrap');
+  if(wrap && wrap.contains(e.target)) return;
+  panel.classList.remove('show');
 });
 
 /* =====================================================================
