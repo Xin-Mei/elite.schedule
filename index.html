@@ -2652,12 +2652,13 @@
 
       <div class="section-h">八週變形工時區間</div>
       <div class="section-desc">
-        最多保留 3 個區間 (歷史 / 當前 / 未來) 供查閱。<br>
-        💡 若想統一管理所有院區的區間,可在 Google Sheet 的 <code>_工時區間</code> 工作簿維護,系統會自動套用作為新院區的預設值。
+        每組 8 週區間皆可獨立排班。已啟用「自動同步」:Sheet <code>_工時區間</code> 新增的區間會自動套用至此清單。<br>
+        💡 從 Sheet 刪除舊區間時,此處<b>已建立的歷史區間不會被自動刪除</b>(只加不刪),管理員可放心釋放 24 組上限的空間。<br>
+        💡 若要清除此處某個歷史區間,請點該區間旁的「✕」手動刪除;<code>_輪班循環</code>、員工區間設定不受影響。
       </div>
       <div id="periodList"></div>
       <button class="btn" onclick="addPeriod()">＋ 新增 8 週區間</button>
-      <button class="btn" onclick="loadGlobalPeriods()" style="margin-left:8px;">↻ 套用 Sheet 共用區間</button>
+      <button class="btn" onclick="loadGlobalPeriods()" style="margin-left:8px;">↻ 從 Sheet 重新套用 (覆蓋為 Sheet 內容)</button>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('settingsModal')">取消</button>
