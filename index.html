@@ -325,6 +325,16 @@
     flex-wrap:wrap; gap:14px;
     padding: 0 28px 14px;
   }
+  /* 麵包屑(含 12 個院區膠囊)可縮、可換行;右側管理員按鈕不縮、保持在右側 */
+  .branch-toolbar > .crumb{
+    flex: 1 1 auto;
+    min-width:0;
+  }
+  .branch-toolbar > .branch-actions{
+    flex: 0 0 auto;
+    display:flex; gap:8px; flex-wrap:wrap;
+    margin-left:auto;
+  }
   .crumb{
     display:flex; align-items:center; gap:12px;
     font-size:18px; color:var(--muted);
@@ -340,12 +350,19 @@
     font-size:22px;
     display:inline-flex; align-items:center;
   }
-  /* 管理員可切換院區的膠囊列 — 12 個院區並排 (放在 breadcrumb 中) */
+  /* 管理員可切換院區的膠囊列 — 12 個院區強制兩行各 6 個 (放在 breadcrumb 中) */
   .branch-pills{
-    display:inline-flex;
-    flex-wrap:wrap;
-    gap:6px;
+    display:grid;
+    grid-template-columns:repeat(6, max-content);
+    gap:6px 8px;
     align-items:center;
+  }
+  /* 螢幕較窄時退回 4 欄 (3 行) → 3 欄 (4 行),確保都能塞下 */
+  @media (max-width: 1100px){
+    .branch-pills{ grid-template-columns:repeat(4, max-content); }
+  }
+  @media (max-width: 720px){
+    .branch-pills{ grid-template-columns:repeat(3, max-content); }
   }
   .branch-pill{
     appearance:none;
@@ -2448,7 +2465,7 @@
       <span class="sep">›</span>
       <span class="current" id="branchTitle"></span>
     </div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <div class="branch-actions">
       <button class="btn admin-only" onclick="openSettingsModal()">⚙ 院區設定</button>
       <button class="btn admin-only" onclick="autoGenerate()">⚡ 自動排班</button>
       <button class="btn primary admin-only" onclick="downloadA4()">📥 下載圖片</button>
