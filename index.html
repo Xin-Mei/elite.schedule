@@ -7249,11 +7249,32 @@ function removePeriod(idx){
 // Helper — parse a pattern string (accepts various separators) → ['早','早','晚','晚','休','休']
 function parsePatternString(patternStr){
   const s = String(patternStr || '');
+  // 合法的循環符號:早 / 午 / 晚 / 出勤 (12HR) / 休
+  const VALID = ['早','午','晚','出勤','休'];
   const tokens = s.split(/[\s,、]+/).filter(Boolean);
-  let pattern = (tokens.length > 1)
-    ? tokens
-    : s.split('').filter(c => /[早午晚休]/.test(c));
-  return pattern.filter(c => ['早','午','晚','休'].includes(c));
+  let pattern;
+  if(tokens.length > 1){
+    // 用空白/逗號/頓號分隔的 → 直接用 token
+    pattern = tokens;
+  } else {
+    // 沒分隔符 → 逐字解析,但要把「出勤」當成兩字 token 抓出來
+    // (例:「出勤休出勤休」 → ['出勤','休','出勤','休'])
+    pattern = [];
+    let i = 0;
+    while(i < s.length){
+      // 嘗試先抓「出勤」(兩字)
+      if(s.substr(i, 2) === '出勤'){
+        pattern.push('出勤');
+        i += 2;
+      } else if(/[早午晚休]/.test(s[i])){
+        pattern.push(s[i]);
+        i += 1;
+      } else {
+        i += 1;  // 跳過無效字元
+      }
+    }
+  }
+  return pattern.filter(c => VALID.includes(c));
 }
 
 // Helper — short label for a pattern array, e.g. "早早晚晚休休 (6 天)"
@@ -7278,7 +7299,7 @@ function loadGlobalPattern(){
   })).filter(c => c.pattern.length);
 
   if(!candidates.length){
-    toast(`"${p}" 的共用循環格式無效 (應為早/午/晚/休)`,'error');
+    toast(`"${p}" 的共用循環格式無效 (應為早/午/晚/出勤/休)`,'error');
     return;
   }
 
