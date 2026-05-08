@@ -338,6 +338,46 @@
     font-weight:700;
     letter-spacing:3px;
     font-size:22px;
+    display:inline-flex; align-items:center; gap:4px;
+    position:relative;
+  }
+  /* 管理員可切換院區的下拉 — 外觀偽裝成原標題,但底下是 native select */
+  .crumb .branch-switch{
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background:transparent;
+    border:none;
+    border-bottom:2px dashed transparent;
+    padding:2px 22px 2px 4px;
+    margin:0;
+    font:inherit;
+    color:inherit;
+    letter-spacing:inherit;
+    cursor:pointer;
+    outline:none;
+    border-radius:6px;
+    transition:all .15s ease;
+    /* 隱藏 select 的下三角預設樣式 */
+    text-overflow:ellipsis;
+    /* 確保至少能點到 */
+    min-width:120px;
+    box-sizing:border-box;
+  }
+  .crumb .branch-switch:hover{
+    background:var(--teal-50);
+    border-bottom-color:var(--teal-600);
+  }
+  .crumb .branch-switch:focus{
+    background:var(--teal-50);
+    box-shadow:0 0 0 3px rgba(63,184,179,0.18);
+  }
+  .crumb .branch-switch-arrow{
+    position:absolute;
+    right:6px; top:50%;
+    transform:translateY(-50%);
+    font-size:14px;
+    color:var(--teal-700);
+    pointer-events:none;
+    opacity:0.7;
   }
 
   /* ========== Position selector ========== */
@@ -1839,6 +1879,9 @@
     letter-spacing:1px;
     margin-top:2px;
     font-family:"Noto Sans TC", sans-serif;
+    word-break:break-word;
+    white-space:normal;
+    line-height:1.3;
   }
   /* 各種假別 (leave) — red tones */
   .name-pill.mode-leave{
@@ -1857,6 +1900,9 @@
     letter-spacing:1px;
     margin-top:2px;
     font-family:"Noto Sans TC", sans-serif;
+    word-break:break-word;
+    white-space:normal;
+    line-height:1.3;
   }
   /* Reason badge below name */
   .name-pill .reason-badge{
@@ -3583,10 +3629,47 @@ function openBranch(name){
   State.currentPeriodIndex = 0;
   $('homeView').style.display='none';
   $('branchView').classList.add('active');
-  $('branchTitle').textContent = name + ' 院區';
+  renderBranchTitle();
   renderPositionBar();
   renderBranch();
   updateHash();
+}
+
+// 渲染麵包屑中的「院區名稱」— 管理員看到下拉(可直接切換),其他角色看純文字
+function renderBranchTitle(){
+  const el = $('branchTitle');
+  if(!el) return;
+  const isAdmin = State.user && State.user.role === 'admin';
+  const cur = State.currentBranch || '';
+  if(isAdmin){
+    el.innerHTML = `
+      <select class="branch-switch" onchange="switchBranch(this.value)" title="切換院區">
+        ${BRANCHES.map(b => `<option value="${b}"${b===cur?' selected':''}>${b} 院區</option>`).join('')}
+      </select>
+      <span class="branch-switch-arrow" aria-hidden="true">▾</span>
+    `;
+  } else {
+    el.textContent = cur + ' 院區';
+  }
+}
+
+// 切換到指定院區 (保留目前職位/期數,若該職位被新院區隱藏則自動 fallback)
+function switchBranch(name){
+  if(!name || name === State.currentBranch) return;
+  if(!BRANCHES.includes(name)){
+    toast('未知院區:' + name, 'warn');
+    return;
+  }
+  // 切換時保留目前職位的選擇,但若該職位在新院區被設為隱藏,則交給 renderPositionBar 自動 fallback
+  // currentPeriodIndex 重設為 0(因為每個院區的 periods 可能不同)
+  State.currentBranch = name;
+  State.currentPeriodIndex = 0;
+  // 確保切到新院區後,顯示控制等狀態能正確讀取(會走 localStorage)
+  renderBranchTitle();
+  renderPositionBar();
+  renderBranch();
+  updateHash();
+  toast('已切換至 ' + name + ' 院區');
 }
 
 function backToHome(){
@@ -3644,7 +3727,7 @@ function restoreFromHash(){
     if(params.m) State.partTimeMonth = params.m;
     $('homeView').style.display='none';
     $('branchView').classList.add('active');
-    $('branchTitle').textContent = params.b + ' 院區';
+    renderBranchTitle();
     renderPositionBar();
     renderBranch();
     // Re-write hash to ensure it matches what we restored
@@ -4843,31 +4926,37 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         }).join('');
         modeClass = (swap.mode === 'support') ? 'mode-support' : 'mode-leave';
       } else if(swap.mode === 'support'){
-        // 私事支援:顯示代班人姓名,若有院區資訊則顯示在下方第二行
+        // 私事支援:顯示代班人姓名,院區+備註合併到同一行(同字體大小)
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
-        if(cv.branch) pillContent += `<span class="cover-branch">${cv.branch}</span>`;
+        const noteForLine = String(swap.note || '').trim();
+        const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+        if(meta){
+          const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          pillContent += `<span class="cover-branch">${safe}</span>`;
+        }
         modeClass = 'mode-support';
       } else {
-        // 缺人 + 各種假別:紅底 + 代班人姓名
+        // 缺人 + 各種假別:紅底 + 代班人姓名,院區+備註合併到同一行
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
-        if(cv.branch) pillContent += `<span class="cover-branch">${cv.branch}</span>`;
+        const noteForLine = String(swap.note || '').trim();
+        const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+        if(meta){
+          const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          pillContent += `<span class="cover-branch">${safe}</span>`;
+        }
         modeClass = 'mode-leave';
       }
-      // ─── 備註顯示 (取代原本的缺人/假別文字註記) ───────────────
+      // ─── 備註顯示 ─────────────────────────────────────────
       // 隱私規則:
       //   • 備註對所有人可見 (員工亦可見備註內容,例如「DR16」)
-      //   • 兩段班的備註已在上方分段顯示,此處不重複輸出
-      //   • 假別文字(缺人/產檢等)依然不顯示在排班表上,要看假別請至「班別異動記錄」分頁
+      //   • 單一代班的備註已合併到 cover-branch 同一行 (上方),此處不重複
+      //   • 兩段班的備註已在分段中顯示,此處不重複
+      //   • 假別文字(缺人/產檢等)依然不顯示在排班表上;要看請至「班別異動記錄」分頁
+      // (注:單一代班備註已併入 pillContent 的 cover-branch span,所以這裡 noteHtml 永遠空)
       const noteText = String(swap.note || '').trim();
-      let noteHtml = '';
-      if(noteText && !splitCovers){
-        // 換行顯示在 pill 下方;HTML escape 以防備註內含特殊字元
-        const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                             .replace(/\n/g,'<br>');
-        noteHtml = `<span class="cell-note">${safe}</span>`;
-      }
+      const noteHtml = '';
       // (不再以 swap.reason 作為 fallback 顯示假別文字 — 排班表上一律不顯示假別)
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
       const tip = isAdmin
@@ -7274,23 +7363,22 @@ async function downloadA4(){
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
-              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              const noteForLine = String(swap.note || '').trim();
+              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';   // 柔和的暖黃
             } else {
               const cv = parseCover(swap.coverName || n);
-              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              const noteForLine = String(swap.note || '').trim();
+              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            // 備註顯示在 pill 下方
-            // 隱私規則同 renderCell:排班表上一律不顯示假別文字(缺人/產檢等)
-            // 兩段班的備註已在分段中個別顯示,此處不重複輸出
-            const noteText = String(swap.note || '').trim();
-            let noteHtml = '';
-            if(noteText && !isSplit){
-              const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                                  .replace(/\n/g,'<br>');
-              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
-            }
+            // 備註已合併到 cover-branch 同行,此處不重複輸出
+            // (僅兩段班需要在分段渲染後不再重複,但兩段班的 displayHtml 自己處理過了)
+            const noteHtml = '';
             return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px;">${n}</span>`;
@@ -7568,23 +7656,21 @@ async function downloadA4PartTime(){
               else                         { bg = '#fde6e6'; fg = '#a83838'; }
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
-              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              const noteForLine = String(swap.note || '').trim();
+              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';
             } else {
               const cv = parseCover(swap.coverName || n);
-              displayHtml = cv.name + (cv.branch ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${cv.branch}</span>` : '');
+              const noteForLine = String(swap.note || '').trim();
+              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
-            // 備註顯示在 pill 下方
-            // 隱私規則同網頁排班表:不再以 swap.reason 顯示假別文字
-            // 兩段班的備註已在分段中個別顯示,此處不重複
-            const noteText = String(swap.note || '').trim();
-            let noteHtml = '';
-            if(noteText && !isSplit){
-              const safe = noteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                                  .replace(/\n/g,'<br>');
-              noteHtml = `<span style="display:block; font-size:9px; font-weight:400; margin-top:2px; padding-top:2px; border-top:1px dashed currentColor; opacity:0.85; line-height:1.3; word-break:break-word; white-space:normal;">${safe}</span>`;
-            }
+            // 備註已合併到 cover-branch 同行,此處不重複輸出
+            const noteHtml = '';
             return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           // 一般人員(工讀沒有 ABCD 分組,使用通用青綠色 pill)
@@ -7745,6 +7831,13 @@ function applyRole(){
   } else if(role === 'employee'){
     if($('empName'))  $('empName').textContent  = State.user.name  || State.user.employeeId || '員工';
     if($('empTitle')) $('empTitle').textContent = State.user.jobTitle || '員工';
+  }
+
+  // 角色切換時,重新渲染 breadcrumb (admin 看到下拉/其他角色看純文字)
+  // 並重渲職位列(因為 ⚙ 顯示控制按鈕 admin only)
+  if(State.currentBranch){
+    if(typeof renderBranchTitle === 'function') renderBranchTitle();
+    if(typeof renderPositionBar === 'function') renderPositionBar();
   }
 }
 
