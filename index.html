@@ -829,7 +829,9 @@
   .form-row label{
     font-size:15px; color:var(--muted); letter-spacing:2px;
   }
-  .form-row input, .form-row select, .form-row textarea{
+  .form-row input:not([type="checkbox"]):not([type="radio"]),
+  .form-row select,
+  .form-row textarea{
     padding:13px 18px;
     border-radius:10px;
     border:1px solid var(--line);
@@ -848,6 +850,12 @@
   .form-row input:focus, .form-row select:focus, .form-row textarea:focus{
     outline:none; border-color:var(--teal-600);
     box-shadow:0 0 0 3px rgba(63,184,179,0.18);
+  }
+  /* checkbox / radio 保留原生樣式,不被 width:100% 撐爆 */
+  .form-row input[type="checkbox"],
+  .form-row input[type="radio"]{
+    width:auto;
+    flex-shrink:0;
   }
   .form-grid{
     display:grid; grid-template-columns:1fr 1fr; gap:14px;
@@ -2816,12 +2824,20 @@
 
       <!-- Block B: 私事支援 (mode=support) -->
       <div id="swapBlockSupport">
-        <div class="form-row">
-          <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
-          <input type="text" class="swap-cover-input" placeholder="如:王小美 (不限本院區)" oninput="syncSwapCover(this)"/>
-          <div style="font-size:13px; color:var(--muted); margin-top:4px;">
-            可填本院區員工或外院區/院外人員
+        <div class="form-grid form-grid-2">
+          <div class="form-row">
+            <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+            <select id="swapSupportCoverBranch" onchange="syncSwapSupportCover()">
+              <option value="">— 請選擇 —</option>
+            </select>
           </div>
+          <div class="form-row">
+            <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+            <input type="text" id="swapSupportCoverName" placeholder="如:王小美" oninput="syncSwapSupportCover()"/>
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-top:-8px; margin-bottom:14px;">
+          可填本院區員工或外院區/院外人員
         </div>
       </div>
 
@@ -3877,17 +3893,19 @@ function updateHash(){
   if(State.currentBranch){
     const h = `b=${encodeURIComponent(State.currentBranch)}&p=${encodeURIComponent(State.currentPosition || '櫃台')}`;
     history.replaceState(null, '', '#' + h);
-    // Also save to sessionStorage as a fallback (covers cases where hash was cleared)
-    try {
-      sessionStorage.setItem('elite_lastView', JSON.stringify({
-        branch: State.currentBranch,
-        position: State.currentPosition || '櫃台',
-        partTimeMonth: State.partTimeMonth || ''
-      }));
-    } catch(_){}
+    // Also save to sessionStorage + localStorage as fallback (covers cases where hash was cleared)
+    // localStorage 用於跨分頁還原 view state(不算登入狀態)
+    const view = {
+      branch: State.currentBranch,
+      position: State.currentPosition || '櫃台',
+      partTimeMonth: State.partTimeMonth || ''
+    };
+    try { sessionStorage.setItem('elite_lastView', JSON.stringify(view)); } catch(_){}
+    try { localStorage.setItem('elite_lastView', JSON.stringify(view)); } catch(_){}
   } else {
     history.replaceState(null, '', location.pathname + location.search);
     try { sessionStorage.removeItem('elite_lastView'); } catch(_){}
+    try { localStorage.removeItem('elite_lastView'); } catch(_){}
   }
 }
 
@@ -3901,10 +3919,21 @@ function restoreFromHash(){
       if(k) params[k] = decodeURIComponent(v || '');
     });
   }
-  // Fallback: sessionStorage
+  // Fallback 1: sessionStorage (本分頁內)
   if(!params.b){
     try {
       const saved = JSON.parse(sessionStorage.getItem('elite_lastView') || 'null');
+      if(saved && saved.branch){
+        params.b = saved.branch;
+        params.p = saved.position;
+        if(saved.partTimeMonth) params.m = saved.partTimeMonth;
+      }
+    } catch(_){}
+  }
+  // Fallback 2: localStorage (跨分頁/重新整理 — view state 不是登入,可長期保留)
+  if(!params.b){
+    try {
+      const saved = JSON.parse(localStorage.getItem('elite_lastView') || 'null');
       if(saved && saved.branch){
         params.b = saved.branch;
         params.p = saved.position;
@@ -5152,7 +5181,26 @@ function renderScheduleTable(setting, period){
       for(let d=0; d<7; d++){
         const dt = addDays(startD, w*7+d);
         const ds = fmt(dt);
-        const cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
+        let cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
+        // ─── 區間 fallback ───────────────────────────────────────
+        // 若 cell 中的員工當日不是該組的有效員工 (例如瑜軒 from=5/16,但 sheet 中 5/11 被寫了瑜軒),
+        // 顯示為「該組的字母代號」(A/B/C/D),避免使用者看到不該出現的人
+        if(cell.length){
+          const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+          const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
+          cell = cell.map(n => {
+            if(!n) return n;
+            if(validNames.has(n)) return n;
+            // n 不是當日有效員工 → 找他的組別,顯示為該組字母
+            // (若該組當日另有有效員工,顯示那位的姓名;否則顯示組別字母)
+            const empRec = setting.employees.find(e => e.name === n);
+            if(!empRec) return n;
+            const grp = empRec.group;
+            // 該組當日有沒有別的有效員工?
+            const altEff = dayEffEmps.find(e => e.group === grp);
+            return altEff ? altEff.name : grp;
+          });
+        }
         html += `<td>${renderCell(cell, ds, sr.label, groupOfFor(ds), swapMap)}</td>`;
       }
       html += `</tr>`;
@@ -5499,6 +5547,14 @@ function openSwapModal(date, shift, name){
   }
   $('swapLeaveCoverName').value = '';
 
+  // ─── Populate support-mode "cover branch" dropdown (同 leave 模式) ────
+  const sbSel = $('swapSupportCoverBranch');
+  if(sbSel){
+    sbSel.innerHTML = `<option value="">— 請選擇 —</option>` +
+      COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+  }
+  if($('swapSupportCoverName')) $('swapSupportCoverName').value = '';
+
   // ─── Populate swap-mode 對方換班班別 dropdown ────────────────────────
   // 依當前院區+職位的設定動態填入 (count > 0 才顯示) — 與 combo 同邏輯
   const sptSel = $('swapPartnerShift');
@@ -5572,6 +5628,18 @@ function openSwapModal(date, shift, name){
     } else {
       $('swapCover').value = existing.coverName || '';
       document.querySelectorAll('.swap-cover-input').forEach(el=>el.value = existing.coverName || '');
+      // For support mode, parse "Name (Branch)" back into the two fields
+      if(existing.mode === 'support'){
+        const m = String(existing.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
+        if(m){
+          if($('swapSupportCoverName')) $('swapSupportCoverName').value = m[1].trim();
+          if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('swapSupportCoverBranch')){
+            $('swapSupportCoverBranch').value = m[2].trim();
+          }
+        } else if($('swapSupportCoverName')){
+          $('swapSupportCoverName').value = existing.coverName || '';
+        }
+      }
       // For leave mode, parse "Name (Branch)" back into the two fields
       if(existing.mode === 'leave'){
         // ─── 偵測既有紀錄是否為「兩段班」並還原 UI ─────────────
@@ -6467,6 +6535,19 @@ function syncSwapLeaveCover(){
   }
 }
 
+// Combine support-mode cover-branch + name into "Name (Branch)" format
+function syncSwapSupportCover(){
+  const branch = $('swapSupportCoverBranch').value;
+  const name = $('swapSupportCoverName').value.trim();
+  if(name && branch){
+    $('swapCover').value = `${name} (${branch})`;
+  } else if(name){
+    $('swapCover').value = name;
+  } else {
+    $('swapCover').value = '';
+  }
+}
+
 function selectReason(reason){
   $('swapReason').value = reason;
   document.querySelectorAll('.reason-pill').forEach(p=>{
@@ -6796,9 +6877,12 @@ async function submitSwap(){
       coverName = `${ln} (${lb})`;
     }
   } else {
-    // 私事支援
-    coverName = $('swapCover').value.trim();
-    if(!coverName){ toast('請填入代班人員姓名','warn'); return; }
+    // 私事支援:必填院區 + 姓名 (與 leave 一致)
+    const sb = ($('swapSupportCoverBranch') && $('swapSupportCoverBranch').value) || '';
+    const sn = (($('swapSupportCoverName') && $('swapSupportCoverName').value) || '').trim();
+    if(!sb){ toast('請選擇代班人員院區','warn'); return; }
+    if(!sn){ toast('請填寫代班人員姓名','warn'); return; }
+    coverName = `${sn} (${sb})`;
   }
 
   // 兩段班的 rec.note 串接兩段備註(例:"早:DR16 / 晚:DR47"),方便記錄列表預覽;
