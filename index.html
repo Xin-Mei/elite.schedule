@@ -5257,13 +5257,32 @@ function renderSummary(setting, period){
         return;
       }
       // 一般跨日換班:套用原有邏輯 — 視原排班與目標日期實際情況計算
-      const cell = (sched.shifts||{})[s.date];
-      const origWasWorking = cell && (
-        (cell.morning||[]).includes(orig) ||
-        (cell.noon||[]).includes(orig) ||
-        (cell.evening||[]).includes(orig) ||
-        (cell.attendance||[]).includes(orig)
-      );
+      // 注意:cell 中員工要看「該筆 swap 之前已套用其他 swap 後的狀態」(effective cell)
+      //      因為連續多筆單向 swap 時,sheet 原始 cell 中可能仍存著舊員工,
+      //      用 sheet 原始 cell 會讓 tgtWasWorking 判斷錯誤 → 漏掉 +1 → 總 delta 累積為負
+      // 算「該筆 swap 之前」(以 createdAt 為序) 已套用所有其他 swap 的 effective cell
+      const rawCell = (sched.shifts||{})[s.date] || {};
+      const effCell = JSON.parse(JSON.stringify(rawCell));
+      const SHIFT_KEYS_LOCAL = ['morning','noon','evening','attendance'];
+      const SHIFT_LABEL_TO_KEY = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+      // 套用所有「在這筆 swap 之前發生」的同日 swap (排除自己)
+      swaps.forEach(other => {
+        if(other === s) return;
+        if(other.mode !== 'swap') return;
+        if(other.date !== s.date) return;
+        // 用 createdAt 比較順序,older 優先
+        if(new Date(other.createdAt) >= new Date(s.createdAt)) return;
+        const oOrig = other.originalName;
+        const oNew = (other.swapWith || [])[0];
+        if(!oOrig || !oNew) return;
+        const oSk = SHIFT_LABEL_TO_KEY[other.shift];
+        if(!oSk) return;
+        // 把該班的 oOrig 換成 oNew (若存在)
+        if(effCell[oSk] && effCell[oSk].includes(oOrig)){
+          effCell[oSk] = effCell[oSk].map(n => n === oOrig ? oNew : n);
+        }
+      });
+      const origWasWorking = SHIFT_KEYS_LOCAL.some(sk => (effCell[sk]||[]).includes(orig));
       // After swap: original is off this day (if was working) → +1 off
       if(origWasWorking){
         offAdjustments[orig].swapNetWorkDelta -= 1; // -1 work = +1 off
@@ -5283,12 +5302,7 @@ function renderSummary(setting, period){
         // For each swap target, if NOT already working that day → +1 work day for them
         (s.swapWith || []).forEach(name=>{
           if(!offAdjustments[name]) return; // not in this position
-          const tgtWasWorking = cell && (
-            (cell.morning||[]).includes(name) ||
-            (cell.noon||[]).includes(name) ||
-            (cell.evening||[]).includes(name) ||
-            (cell.attendance||[]).includes(name)
-          );
+          const tgtWasWorking = SHIFT_KEYS_LOCAL.some(sk => (effCell[sk]||[]).includes(name));
           if(!tgtWasWorking){
             offAdjustments[name].swapNetWorkDelta += 1; // -1 off
             const tgtGrp = groupOfNameOnDate(name, s.date);
