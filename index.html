@@ -5236,9 +5236,47 @@ function renderSummary(setting, period){
   });
   const SHIFT_KEYS_GLOB = ['morning','noon','evening','attendance'];
   const SHIFT_LABEL_TO_KEY_GLOB = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  // ─── 現場計算 cell helper (用於 swap 工時計算) ──────────────────
+  // 跟排班表渲染一樣,工時計算也用「現場計算」當基底,確保跟畫面一致
+  const _swapIsPartTime = (State.currentPosition === '工讀');
+  const _swapAbsPeriodIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+  const _swapPeriodOffset = (_swapAbsPeriodIdx >= 0 ? _swapAbsPeriodIdx : 0) * 56;
+  const _swapPattern = setting.rules.cyclePattern || [];
+  const _swapMorn = setting.rules.morningCount || 0;
+  const _swapNoon = setting.rules.noonCount || 0;
+  const _swapEve  = setting.rules.eveningCount || 0;
+  const _swapAtt  = setting.rules.attendanceCount || 0;
+  const _swapPeriodStartD = parseDate(period.startDate);
+  const _swapComputeCell = (ds) => {
+    if(_swapIsPartTime){
+      // 工讀仍讀 sheet
+      return (sched.shifts || {})[ds] || {};
+    }
+    const result = {morning:[], noon:[], evening:[], attendance:[]};
+    if(!_swapPattern.length) return result;
+    const dt = parseDate(ds);
+    const dayDiff = Math.floor((dt - _swapPeriodStartD) / 86400000);
+    if(dayDiff < 0 || dayDiff >= 56) return result;
+    const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+    dayEffEmps.forEach(emp => {
+      if(!emp.name || !emp.group) return;
+      const cycPos = ((emp.startIndex - 1) + _swapPeriodOffset + dayDiff) % _swapPattern.length;
+      const sym = _swapPattern[cycPos];
+      if(sym === '早'){
+        if(_swapMorn === 0 || result.morning.length < _swapMorn) result.morning.push(emp.name);
+      } else if(sym === '午'){
+        if(_swapNoon === 0 || result.noon.length < _swapNoon) result.noon.push(emp.name);
+      } else if(sym === '晚'){
+        if(_swapEve === 0 || result.evening.length < _swapEve) result.evening.push(emp.name);
+      } else if(sym === '出勤'){
+        if(_swapAtt === 0 || result.attendance.length < _swapAtt) result.attendance.push(emp.name);
+      }
+    });
+    return result;
+  };
   // 對每天,計算 effCell 並累積每員工的 delta
   Object.keys(swapsByDate).forEach(ds => {
-    const rawCell = (sched.shifts || {})[ds] || {};
+    const rawCell = _swapComputeCell(ds);
     const effCell = JSON.parse(JSON.stringify(rawCell));
     // 同日 swap 依序套用
     swapsByDate[ds].forEach(s => {
@@ -5327,20 +5365,37 @@ function renderSummary(setting, period){
                 || setting.employees.find(e=>e.group===g)
                 || {group:g, name:''};
     // 計算 baseWork:每天用「該日有效的此組員工」計入,支援區間切換
+    // 改為「現場計算」 — 不再讀 sheet cell 中的姓名,而是用 cyclePattern + startIndex
+    // 推算當日該組是否上班 (與排班表渲染邏輯一致)
     let baseWork = 0;
+    const _isPartTime = (State.currentPosition === '工讀');
+    const _absPeriodIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+    const _periodOffset = (_absPeriodIdx >= 0 ? _absPeriodIdx : 0) * totalDays;
+    const _pattern = setting.rules.cyclePattern || [];
     for(let i=0;i<totalDays;i++){
       const ds = fmt(addDays(startD,i));
-      const cell = (sched.shifts||{})[ds];
-      if(!cell) continue;
       // 找該日該組的有效員工
       const dayEmps = getEffectiveEmployees(setting.employees, ds);
       const dayEmp = dayEmps.find(e => e.group === g);
       if(!dayEmp || !dayEmp.name) continue;
       const n = dayEmp.name;
-      if((cell.morning||[]).includes(n)) baseWork++;
-      if((cell.noon||[]).includes(n)) baseWork++;
-      if((cell.evening||[]).includes(n)) baseWork++;
-      if((cell.attendance||[]).includes(n)) baseWork++;
+      if(_isPartTime){
+        // 工讀:仍讀 sheet (沒有循環)
+        const cell = (sched.shifts||{})[ds];
+        if(!cell) continue;
+        if((cell.morning||[]).includes(n)) baseWork++;
+        if((cell.noon||[]).includes(n)) baseWork++;
+        if((cell.evening||[]).includes(n)) baseWork++;
+        if((cell.attendance||[]).includes(n)) baseWork++;
+      } else {
+        // 一般職位:用循環現場算 — 該員工今天該上的班別
+        if(!_pattern.length) continue;
+        const cycPos = ((dayEmp.startIndex - 1) + _periodOffset + i) % _pattern.length;
+        const sym = _pattern[cycPos];
+        if(sym === '早' || sym === '午' || sym === '晚' || sym === '出勤'){
+          baseWork++;   // 每個上班符號 = 1 個上班日
+        }
+      }
     }
     // adj 改讀 group level 累積值 (整組 leaveDays / swapNetWorkDelta),
     // 才能在「期間中換人」時依然正確顯示 (因為 swap 紀錄可能屬於該組的舊員工)
@@ -5501,6 +5556,48 @@ function renderScheduleTable(setting, period){
     return groupOfByDate[dateStr];
   }
 
+  // ─── 現場計算 cell:依 employees + cyclePattern + startIndex 計算該日該班該誰上 ────
+  // 取代 sheet 中可能殘留的舊員工姓名,確保排班表永遠跟員工名單一致。
+  // 工讀職位無循環 → 不適用,仍讀 sheet。
+  const isPartTime = (State.currentPosition === '工讀');
+  // 找當前 period 在 setting.periods 中的絕對索引,用於跨期累積 offset
+  const absPeriodIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+  const periodOffset = (absPeriodIdx >= 0 ? absPeriodIdx : 0) * 56;
+  const pattern = setting.rules.cyclePattern || [];
+  const morn = setting.rules.morningCount || 0;
+  const noon = setting.rules.noonCount || 0;
+  const eve  = setting.rules.eveningCount || 0;
+  const att  = setting.rules.attendanceCount || 0;
+  // computeShiftCell(ds): 回傳 {morning:[...], noon:[...], evening:[...], attendance:[...]}
+  const SHIFT_LABELS_TO_KEY_LOCAL = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  const computeShiftCell = (ds) => {
+    const result = {morning:[], noon:[], evening:[], attendance:[]};
+    if(!pattern.length) return result;
+    const dt = parseDate(ds);
+    const dayDiff = Math.floor((dt - startD) / 86400000);
+    if(dayDiff < 0 || dayDiff >= 56) return result;   // 區間外
+    // 取當日有效員工 (考慮 from/to 區間切割)
+    const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+    // 同組可能有多筆員工 (區間切割) → 每組只取一筆 (getEffectiveEmployees 已處理)
+    dayEffEmps.forEach(emp => {
+      if(!emp.name || !emp.group) return;
+      const cycPos = ((emp.startIndex - 1) + periodOffset + dayDiff) % pattern.length;
+      const sym = pattern[cycPos];
+      // 上限保險 (跟 autoGenerate 一致):cell 已滿不再 push
+      if(sym === '早'){
+        if(morn === 0 || result.morning.length < morn) result.morning.push(emp.name);
+      } else if(sym === '午'){
+        if(noon === 0 || result.noon.length < noon) result.noon.push(emp.name);
+      } else if(sym === '晚'){
+        if(eve === 0 || result.evening.length < eve) result.evening.push(emp.name);
+      } else if(sym === '出勤'){
+        if(att === 0 || result.attendance.length < att) result.attendance.push(emp.name);
+      }
+      // 其他符號 (休) 不填
+    });
+    return result;
+  };
+
   const hasNoon = (setting.rules.noonCount || 0) > 0;
   const hasAttendance = (setting.rules.attendanceCount || 0) > 0;
 
@@ -5557,25 +5654,15 @@ function renderScheduleTable(setting, period){
       for(let d=0; d<7; d++){
         const dt = addDays(startD, w*7+d);
         const ds = fmt(dt);
-        let cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
-        // ─── 區間 fallback ───────────────────────────────────────
-        // 若 cell 中的員工當日不是該組的有效員工 (例如瑜軒 from=5/16,但 sheet 中 5/11 被寫了瑜軒),
-        // 顯示為「該組的字母代號」(A/B/C/D),避免使用者看到不該出現的人
-        if(cell.length){
-          const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-          const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
-          cell = cell.map(n => {
-            if(!n) return n;
-            if(validNames.has(n)) return n;
-            // n 不是當日有效員工 → 找他的組別,顯示為該組字母
-            // (若該組當日另有有效員工,顯示那位的姓名;否則顯示組別字母)
-            const empRec = setting.employees.find(e => e.name === n);
-            if(!empRec) return n;
-            const grp = empRec.group;
-            // 該組當日有沒有別的有效員工?
-            const altEff = dayEffEmps.find(e => e.group === grp);
-            return altEff ? altEff.name : grp;
-          });
+        // ─── cell 來源:現場計算 (取代 sheet 中可能殘留的舊員工姓名) ────
+        // 工讀職位無循環 → 仍讀 sheet
+        // 其他職位 → 用 employees + cyclePattern + startIndex 現場算
+        let cell;
+        if(isPartTime){
+          cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
+        } else {
+          const computed = computeShiftCell(ds);
+          cell = computed[sr.key] || [];
         }
         html += `<td>${renderCell(cell, ds, sr.label, groupOfFor(ds), swapMap)}</td>`;
       }
@@ -6775,21 +6862,41 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
 
   // ─── Step 1: Compute BASE work-days per employee (出勤格數) ──────────
   // 1 個格子 = 1 個上班日
+  // 改用「現場計算」 — 不再讀 sheet,而是用 cyclePattern + startIndex 推算
+  // 跟排班表渲染、字卡計算邏輯一致
   const baseWork = {};
   setting.employees.forEach(e => { if(e.name) baseWork[e.name] = 0; });
   const periodStart = parseDate(period.startDate);
+  const _validIsPT = (position === '工讀');
+  const _validAbsIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+  const _validPOffset = (_validAbsIdx >= 0 ? _validAbsIdx : 0) * 56;
+  const _validPattern = setting.rules.cyclePattern || [];
   for(let d=0; d<56; d++){
     const ds = fmt(addDays(periodStart, d));
-    const cell = sched.shifts[ds];
-    if(!cell) continue;
-    setting.employees.forEach(e => {
-      if(!e.name) return;
-      ['morning','noon','evening','attendance'].forEach(sk=>{
-        if((cell[sk] || []).includes(e.name)){
-          baseWork[e.name] += 1;
+    if(_validIsPT){
+      // 工讀:讀 sheet
+      const cell = sched.shifts[ds];
+      if(!cell) continue;
+      setting.employees.forEach(e => {
+        if(!e.name) return;
+        ['morning','noon','evening','attendance'].forEach(sk=>{
+          if((cell[sk] || []).includes(e.name)){
+            baseWork[e.name] += 1;
+          }
+        });
+      });
+    } else if(_validPattern.length){
+      // 一般職位:現場計算 — 該日有效員工依各自 startIndex 算當日班別
+      const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+      dayEffEmps.forEach(emp => {
+        if(!emp.name) return;
+        const cycPos = ((emp.startIndex - 1) + _validPOffset + d) % _validPattern.length;
+        const sym = _validPattern[cycPos];
+        if(sym === '早' || sym === '午' || sym === '晚' || sym === '出勤'){
+          baseWork[emp.name] = (baseWork[emp.name] || 0) + 1;
         }
       });
-    });
+    }
   }
 
   // ─── Step 2: Apply already-approved swaps/leaves to baseline (work-days) ──
@@ -6850,8 +6957,40 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     //   舊版 Step 5 用 sheet 原始 cell (麗巧) 找寶怡 → 找不到 → 跳過 mutation → 漏判衝突
     // 現在改成:先計算「套用既有 swap 後的有效 cell」再做 mutation 檢核
     const computeEffectiveCell = (ds) => {
-      const raw = sched.shifts[ds] ? JSON.parse(JSON.stringify(sched.shifts[ds])) : {};
+      // 用「現場計算」當基底 (依 employees + cyclePattern + startIndex),
+      // 取代 sheet 中可能殘留的舊員工姓名,確保跟排班表畫面一致
       const SHIFT_KEYS = ['morning','noon','evening','attendance'];
+      const _isPT = (position === '工讀');
+      const _absIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+      const _pOffset = (_absIdx >= 0 ? _absIdx : 0) * 56;
+      const _patt = setting.rules.cyclePattern || [];
+      const _morn = setting.rules.morningCount || 0;
+      const _noon = setting.rules.noonCount || 0;
+      const _eve  = setting.rules.eveningCount || 0;
+      const _att  = setting.rules.attendanceCount || 0;
+      const _periodStart = parseDate(period.startDate);
+      let raw;
+      if(_isPT){
+        raw = sched.shifts[ds] ? JSON.parse(JSON.stringify(sched.shifts[ds])) : {};
+      } else {
+        raw = {morning:[], noon:[], evening:[], attendance:[]};
+        if(_patt.length){
+          const dt = parseDate(ds);
+          const dayDiff = Math.floor((dt - _periodStart) / 86400000);
+          if(dayDiff >= 0 && dayDiff < 56){
+            const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+            dayEffEmps.forEach(emp => {
+              if(!emp.name || !emp.group) return;
+              const cycPos = ((emp.startIndex - 1) + _pOffset + dayDiff) % _patt.length;
+              const sym = _patt[cycPos];
+              if(sym === '早'){ if(_morn === 0 || raw.morning.length < _morn) raw.morning.push(emp.name); }
+              else if(sym === '午'){ if(_noon === 0 || raw.noon.length < _noon) raw.noon.push(emp.name); }
+              else if(sym === '晚'){ if(_eve === 0 || raw.evening.length < _eve) raw.evening.push(emp.name); }
+              else if(sym === '出勤'){ if(_att === 0 || raw.attendance.length < _att) raw.attendance.push(emp.name); }
+            });
+          }
+        }
+      }
       // 套用既有的 mode='swap' 紀錄 (排除目前正在驗證的這筆,因為它還沒成立)
       const swapsOnDay = (State.swaps || []).filter(s =>
         s.branch === branch && s.position === position &&
