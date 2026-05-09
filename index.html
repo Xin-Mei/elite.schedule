@@ -7864,6 +7864,45 @@ async function autoGenerate(){
   const att  = setting.rules.attendanceCount || 0;
   const totalDays = 8*7;
 
+  // ─── 衝突預檢:模擬整個循環一輪,看每天每班是否會超出人數設定 ──────
+  // 規則:每個班別最多 N 人 (morningCount/noonCount/eveningCount/attendanceCount)。
+  // 對 pattern 模擬:對每組第 1 位員工的 startIndex 跑 pattern.length 天,
+  //   每天看 A/B/C 三組各排哪個班別,加總比對 *Count 是否超出。
+  // 比直接比對 startIndex 是否相同更精準 — pattern 設計巧妙時不同 startIndex 仍可能衝突。
+  const groupReps = {};   // group → 第 1 位員工 (用其 startIndex)
+  employees.forEach(e => {
+    if(!e.group || !e.name) return;
+    if(!(e.group in groupReps)) groupReps[e.group] = e;
+  });
+  const conflictDays = [];   // [{cycDay, shift, groups:[...]}]
+  for(let cd=0; cd<pattern.length; cd++){
+    const counts = {morning:[], noon:[], evening:[], attendance:[]};
+    Object.keys(groupReps).forEach(g => {
+      const emp = groupReps[g];
+      const cycPos = ((emp.startIndex - 1) + cd) % pattern.length;
+      const sym = pattern[cycPos];
+      if(sym==='早') counts.morning.push(g);
+      else if(sym==='午') counts.noon.push(g);
+      else if(sym==='晚') counts.evening.push(g);
+      else if(sym==='出勤') counts.attendance.push(g);
+    });
+    if(morn > 0 && counts.morning.length > morn) conflictDays.push({cycDay: cd+1, shift:'早', groups: counts.morning, limit: morn});
+    if(noon > 0 && counts.noon.length > noon) conflictDays.push({cycDay: cd+1, shift:'午', groups: counts.noon, limit: noon});
+    if(eve > 0 && counts.evening.length > eve) conflictDays.push({cycDay: cd+1, shift:'晚', groups: counts.evening, limit: eve});
+    if(att > 0 && counts.attendance.length > att) conflictDays.push({cycDay: cd+1, shift:'出勤', groups: counts.attendance, limit: att});
+  }
+  if(conflictDays.length){
+    const sample = conflictDays.slice(0, 6).map(c =>
+      `循環第 ${c.cycDay} 天 ${c.shift}班 → ${c.groups.join('、')} 組 (上限 ${c.limit} 人)`
+    );
+    const more = conflictDays.length > 6 ? `<br>…(共 ${conflictDays.length} 處衝突)` : '';
+    const msg = '依目前的循環模式 + 各組起始位置,會出現「同班多人」的情況:<br><br>' +
+      sample.map(s => `• ${s}`).join('<br>') + more +
+      '<br><br>請至「院區設定」調整循環模式或各組起始位置,使每天同班人數不超過上限。';
+    showAlertModal(msg, { icon: '⚠️', title: '無法自動排班 — 循環設計衝突', manual: true });
+    return;
+  }
+
   // Ask user: only current period, or all configured periods?
   // 預先計算當前院區職位下的異動紀錄涉及多少天 (供 confirm 對話顯示)
   const _existingRecCount = (State.swaps || []).filter(s =>
@@ -7959,11 +7998,24 @@ async function autoGenerate(){
         // emp.startIndex applies to period 0; subsequent periods continue the cycle
         const cycPos = ((emp.startIndex - 1) + periodOffset + i) % pattern.length;
         const sym = pattern[cycPos];
-        if(sym==='早') day.morning.push(emp.name);
-        else if(sym==='午') day.noon.push(emp.name);
-        else if(sym==='晚') day.evening.push(emp.name);
-        else if(sym==='出勤') day.attendance.push(emp.name);
-        else day.off.push(emp.name); // 休
+        // 第二道保險:cell 已滿 (已達 morningCount/noonCount/...) 不再 push
+        // 即使 startIndex 沒衝突,某些循環模式仍可能讓多組同天同班 →
+        // 寧可少排不可超排,超出的員工那班視為「休」(不顯示)
+        if(sym==='早'){
+          if(morn === 0 || day.morning.length < morn) day.morning.push(emp.name);
+          else day.off.push(emp.name);
+        } else if(sym==='午'){
+          if(noon === 0 || day.noon.length < noon) day.noon.push(emp.name);
+          else day.off.push(emp.name);
+        } else if(sym==='晚'){
+          if(eve === 0 || day.evening.length < eve) day.evening.push(emp.name);
+          else day.off.push(emp.name);
+        } else if(sym==='出勤'){
+          if(att === 0 || day.attendance.length < att) day.attendance.push(emp.name);
+          else day.off.push(emp.name);
+        } else {
+          day.off.push(emp.name); // 休
+        }
       });
 
       if(morn>0 && day.morning.length !== morn) issues.push(`${ds} 早班 ${day.morning.length}/${morn}`);
@@ -8606,6 +8658,48 @@ async function saveSettings(){
   s.rules.eveningCount    = Math.max(0, +$('setEvening').value || 0);
   s.rules.attendanceCount = Math.max(0, +$('setAttendance').value || 0);
   State.currentPosition = oldP;
+
+  // ─── 6) 循環衝突檢查:模擬 pattern 看是否有「同班多人」的天 ───────
+  // 比對單純 startIndex 是否相同更精準 — 不同 startIndex 仍可能某天同班。
+  const _patt = s.rules.cyclePattern;
+  const _morn = s.rules.morningCount;
+  const _noon = s.rules.noonCount;
+  const _eve  = s.rules.eveningCount;
+  const _att  = s.rules.attendanceCount;
+  const _groupReps = {};
+  s.employees.forEach(e => {
+    if(!e.name || !e.group) return;
+    if(!(e.group in _groupReps)) _groupReps[e.group] = e;
+  });
+  const _conflictDays = [];
+  for(let cd=0; cd<_patt.length; cd++){
+    const counts = {morning:[], noon:[], evening:[], attendance:[]};
+    Object.keys(_groupReps).forEach(g => {
+      const emp = _groupReps[g];
+      const cycPos = ((emp.startIndex - 1) + cd) % _patt.length;
+      const sym = _patt[cycPos];
+      if(sym==='早') counts.morning.push(g);
+      else if(sym==='午') counts.noon.push(g);
+      else if(sym==='晚') counts.evening.push(g);
+      else if(sym==='出勤') counts.attendance.push(g);
+    });
+    if(_morn > 0 && counts.morning.length > _morn) _conflictDays.push(`循環第 ${cd+1} 天 早班 → ${counts.morning.join('、')} 組 (上限 ${_morn})`);
+    if(_noon > 0 && counts.noon.length > _noon) _conflictDays.push(`循環第 ${cd+1} 天 午班 → ${counts.noon.join('、')} 組 (上限 ${_noon})`);
+    if(_eve  > 0 && counts.evening.length > _eve)  _conflictDays.push(`循環第 ${cd+1} 天 晚班 → ${counts.evening.join('、')} 組 (上限 ${_eve})`);
+    if(_att  > 0 && counts.attendance.length > _att) _conflictDays.push(`循環第 ${cd+1} 天 出勤 → ${counts.attendance.join('、')} 組 (上限 ${_att})`);
+  }
+  if(_conflictDays.length){
+    const sample = _conflictDays.slice(0, 6);
+    const more = _conflictDays.length > 6 ? `\n…(共 ${_conflictDays.length} 處衝突)` : '';
+    const proceed = confirm(
+      `⚠️ 偵測到循環設計衝突:\n\n` +
+      sample.map(c => '• ' + c).join('\n') + more +
+      `\n\n這會導致自動排班時同一天同班被填入多人,班表會錯亂。\n` +
+      `建議調整循環模式或起始位置,使每天同班人數不超過上限。\n\n` +
+      `按【確定】仍然儲存(自動排班會擋下),按【取消】返回修改。`
+    );
+    if(!proceed) return;
+  }
 
   showLoading('儲存設定中…');
   const res = await api('saveSettings', {branch:State.currentBranch, position:pos, data:s});
