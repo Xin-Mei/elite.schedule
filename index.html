@@ -4348,6 +4348,8 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   });
   const weekDayLabels = ['日','一','二','三','四','五','六'];
   const isAdmin = State.user.role === 'admin';
+  // 工讀人員池:admin / manager 看得到並可管理;員工看不到
+  const canSeePartTimePool = State.user && (State.user.role === 'admin' || State.user.role === 'manager');
   const hoursTableHtml = `
     <table class="ptc-hours-table">
       <thead>
@@ -4398,7 +4400,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
          </span>`
       ).join('')
     : '<span style="color:var(--muted); font-size:13px;">尚未設定工讀人員</span>';
-  const staffPoolHtml = `
+  const staffPoolHtml = canSeePartTimePool ? `
     <div class="ptc-staff-pool">
       <div class="ptc-staff-pool-head">
         <span class="ptc-staff-pool-title">👥 工讀人員池 ${isAdmin ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
@@ -4406,7 +4408,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       </div>
       <div class="ptc-staff-chips">${staffChipsHtml}</div>
     </div>
-  `;
+  ` : '';
 
   let html = hoursTableHtml + bulkToolbarHtml + staffPoolHtml + `<table class="schedule"><thead><tr>
     <th class="shift">班</th>
@@ -5074,7 +5076,9 @@ function renderSummary(setting, period){
 
   // Show warnings as a banner at top
   let warnBanner = $('summaryWarnBanner');
-  if(validationWarnings.length){
+  // 員工角色不需要看到管理者的工時警示(僅 admin/manager 看得到)
+  const showWarnings = State.user && (State.user.role === 'admin' || State.user.role === 'manager');
+  if(showWarnings && validationWarnings.length){
     if(!warnBanner){
       warnBanner = document.createElement('div');
       warnBanner.id = 'summaryWarnBanner';
@@ -5380,6 +5384,23 @@ function onCellClick(date, shift, name, evt){
   if(!canEdit){
     if(isPastDate(date)){
       toast('過去日期的排班無法再調整,請聯繫管理員','warn');
+      return;
+    }
+    // 若該 cell 已被管理員設為「請假/缺人」紀錄(紅底),員工不可再申請異動
+    // — 已由管理員處理,員工無權再對此格申請(避免重複/衝突)
+    // 條件:該 cell (branch+position+date+shift) 上有任何 leave 紀錄(originalName 不限,
+    //       因為 combo 場景下 originalName 可能是 partner 而不是當前點到的 name)
+    const existingLeave = (State.swaps || []).find(s =>
+      s.branch === State.currentBranch &&
+      s.position === State.currentPosition &&
+      s.date === date &&
+      s.shift === shift &&
+      s.mode === 'leave' &&
+      !isPendingApplication(s)   // 排除「員工申請中(尚未 approve)」的紀錄
+    );
+    if(existingLeave){
+      const reasonLabel = existingLeave.reason || '請假';
+      toast(`此班別已由管理員調整為「${reasonLabel}」,無法再申請異動`,'warn');
       return;
     }
     openApplyModal({date, shift, name, branch: State.currentBranch, position: State.currentPosition});
