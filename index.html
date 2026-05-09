@@ -2844,18 +2844,21 @@
           </div>
           <div class="form-grid form-grid-2">
             <div class="form-row">
-              <label>對方換班日期 <span style="color:#c14a4a;">*</span></label>
+              <label>對方換班日期 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
               <input type="date" id="comboPartnerDate"/>
               <div style="font-size:12px; color:var(--muted); margin-top:4px;">
-                對方原本上班的某天 (限同 8 週區間)
+                對方原本上班的某天 (限同 8 週區間);留空則為單向換班
               </div>
             </div>
             <div class="form-row">
-              <label>對方換班班別 <span style="color:#c14a4a;">*</span></label>
+              <label>對方換班班別 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
               <select id="comboPartnerShift">
                 <!-- Filled by populateComboBlock based on this position's shift config -->
               </select>
             </div>
+          </div>
+          <div style="font-size:12px; color:var(--muted); margin-top:-6px; margin-bottom:6px; padding:6px 10px; background:#fef3c7; border-radius:6px;">
+            💡 提示:對方換班日期與班別可不填(留空/不選),系統將建立「單向換班」,可能造成上班數不平衡,字卡會出現工時警示供管理員確認。
           </div>
         </div>
 
@@ -7367,14 +7370,23 @@ async function submitSwap(){
     const seg2Cfg = SWAP_REASONS.find(r => r.id === seg2Reason);
     const seg2Mode = seg2Cfg ? seg2Cfg.mode : 'leave';
     if(!partner){ toast('請選擇換班員工','warn'); return; }
-    if(!partnerDate){ toast('請填寫對方換班日期','warn'); return; }
-    if(!partnerShift){ toast('請選擇對方換班班別','warn'); return; }
+    // 對方換班日期/班別:選填
+    //   • 兩者都填 → 雙向換班 (建立 Rec1 + Rec2 + Rec3,共 3 筆)
+    //   • 兩者都空 → 單向換班 (建立 Rec1 + Rec3,共 2 筆;對方那邊不變動,工時不平衡)
+    //   • 只填一個 → 視為填寫不完整,擋下
+    const hasPartnerDate = !!partnerDate;
+    const hasPartnerShift = !!partnerShift;
+    if(hasPartnerDate !== hasPartnerShift){
+      toast('對方換班日期與班別請一併填寫,或一併留空(改為單向換班)','warn');
+      return;
+    }
+    const isOneWay = !hasPartnerDate;   // 兩者都空 → 單向換班
     if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班' || seg2Reason === '私事支援'){
       toast('第二段原因不可為「換班」、「換班+代班」或「私事支援」','warn'); return;
     }
     if(!coverBranch){ toast('請選擇代班人員院區','warn'); return; }
     if(!coverNameRaw){ toast('請填寫代班人員姓名','warn'); return; }
-    if(partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
+    if(!isOneWay && partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
       toast('換班日期/班別不可與本班相同','warn'); return;
     }
     // 編輯既有 combo 紀錄:先把舊群組(3 筆)從 State 移除,再建立新的 3 筆
@@ -7393,23 +7405,25 @@ async function submitSwap(){
         });
       }
     }
-    // 換班目標日須在當前 8 週區間內 (與 swap 一致的限制)
-    const setting = getCurrentSetting();
-    const period = setting.periods[State.currentPeriodIndex];
-    if(period){
-      const startD = parseDate(period.startDate);
-      const endD = addDays(startD, 8*7-1);
-      const tgtD = parseDate(partnerDate);
-      if(tgtD < startD || tgtD > endD){
-        toast(`對方換班日期 ${partnerDate} 不在當前 8 週區間內`,'warn');
-        return;
+    // 換班目標日須在當前 8 週區間內 (與 swap 一致的限制) — 僅雙向換班需要檢查
+    if(!isOneWay){
+      const setting = getCurrentSetting();
+      const period = setting.periods[State.currentPeriodIndex];
+      if(period){
+        const startD = parseDate(period.startDate);
+        const endD = addDays(startD, 8*7-1);
+        const tgtD = parseDate(partnerDate);
+        if(tgtD < startD || tgtD > endD){
+          toast(`對方換班日期 ${partnerDate} 不在當前 8 週區間內`,'warn');
+          return;
+        }
       }
     }
     const recNote = ($('comboNote').value || '').trim();
     const coverFull = `${coverNameRaw} (${coverBranch})`;
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
-    // combo 群組識別碼:同群組 3 筆共用,以利 restoreOriginalSwap 一併取消
+    // combo 群組識別碼:同群組共用,以利 restoreOriginalSwap 一併取消
     // 寫入 note 開頭(後續顯示時過濾掉),例:"[CG:1731234567890] 使用者實際備註"
     const comboGroupId = 'CG:' + baseTime;
     const comboTag = `[${comboGroupId}]`;
@@ -7430,7 +7444,8 @@ async function submitSwap(){
       _unsaved: true,
     };
     // Rec 2: 對方那班(partner → 原員工) — mode=swap (配對 Rec1,使換班整體中性)
-    const rec2 = {
+    // 單向換班時不建立此筆 (對方那邊不變動,字卡會出現工時警示)
+    const rec2 = isOneWay ? null : {
       id: 'STMP' + (baseTime+1) + Math.floor(Math.random()*100),
       branch: State.currentBranch,
       position: State.currentPosition,
@@ -7463,8 +7478,13 @@ async function submitSwap(){
       _unsaved: true,
     };
     State.swaps = State.swaps || [];
-    State.swaps.push(rec1, rec2, rec3);
-    toast(`換班+${seg2Reason} 已建立 3 筆紀錄 (待儲存)`);
+    if(rec2){
+      State.swaps.push(rec1, rec2, rec3);
+      toast(`換班+${seg2Reason} 已建立 3 筆紀錄 (待儲存)`);
+    } else {
+      State.swaps.push(rec1, rec3);
+      toast(`換班+${seg2Reason} 已建立 2 筆紀錄 (單向換班,待儲存)`);
+    }
     closeModal('swapModal');
     renderBranch();
     updateUnsavedBanner();
