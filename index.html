@@ -7865,15 +7865,28 @@ async function autoGenerate(){
   const totalDays = 8*7;
 
   // Ask user: only current period, or all configured periods?
+  // 預先計算當前院區職位下的異動紀錄涉及多少天 (供 confirm 對話顯示)
+  const _existingRecCount = (State.swaps || []).filter(s =>
+    s.branch === State.currentBranch && s.position === State.currentPosition && s.date
+  ).length;
+  const _existingHint = _existingRecCount > 0
+    ? `\n\n💡 偵測到本院區職位有 ${_existingRecCount} 筆異動紀錄(換班/請假/支援/缺人),系統會「跳過」這些日期,既有設定不會被覆蓋。`
+    : '';
   const allPeriods = setting.periods.length > 1;
   let scope = 'current';
   if(allPeriods){
     const choice = confirm(
       `偵測到 ${setting.periods.length} 個八週區間。\n\n` +
       `按【確定】= 為「全部 ${setting.periods.length} 個區間」自動排班 (循環會跨區間連續延伸)\n` +
-      `按【取消】= 只為目前顯示的區間排班`
+      `按【取消】= 只為目前顯示的區間排班` +
+      _existingHint
     );
     scope = choice ? 'all' : 'current';
+  } else if(_existingRecCount > 0){
+    // 即使只有一個區間,也要提醒會保留
+    if(!confirm(`即將為當前區間自動排班。${_existingHint}\n\n按【確定】繼續,按【取消】放棄。`)){
+      return;
+    }
   }
 
   const targetPeriods = scope === 'all'
@@ -7882,6 +7895,19 @@ async function autoGenerate(){
 
   showLoading(`生成 ${targetPeriods.length} 個區間班表…`);
   const issues = [];
+
+  // ─── 收集「已有異動紀錄」的日期 (該院區職位下,所有 mode 都算) ─────
+  // 這些日期的 cell 自動排班會「跳過」(沿用舊 sheet 內容),確保不破壞既有換班/請假/支援/缺人/combo 設定
+  // pendingDeletions 清單中的 id 跳過 (使用者已標記要刪除)
+  const pendingDelSet = new Set(State.pendingDeletions || []);
+  const protectedDates = new Set();
+  (State.swaps || []).forEach(s => {
+    if(s.branch !== State.currentBranch || s.position !== State.currentPosition) return;
+    if(pendingDelSet.has(s.id)) return;
+    if(!s.date) return;
+    protectedDates.add(s.date);
+  });
+  let preservedDayCount = 0;
 
   // Track each employee's cycle offset across periods.
   // For period 0: use emp.startIndex.
@@ -7896,10 +7922,26 @@ async function autoGenerate(){
     const absPeriodIdx = setting.periods.indexOf(period);
     const periodOffset = (absPeriodIdx >= 0 ? absPeriodIdx : pIdx) * totalDays;
 
+    // 取舊 schedule 供「保護日」沿用 (避免破壞既有換班/請假紀錄對應)
+    const oldKey = getScheduleKey(period);
+    const oldShifts = (State.schedules[oldKey] && State.schedules[oldKey].shifts) || {};
+
     const shifts = {};
     for(let i=0; i<totalDays; i++){
       const dt = addDays(startD, i);
       const ds = fmt(dt);
+
+      // ─── 保護日:已有異動紀錄 → 整天沿用舊 cell ──────────────────
+      // 不重生此日,確保既有 swap/leave/support/combo 紀錄的 originalName 仍對應到舊 cell
+      if(protectedDates.has(ds)){
+        if(oldShifts[ds]){
+          shifts[ds] = JSON.parse(JSON.stringify(oldShifts[ds]));
+          preservedDayCount++;
+          continue;
+        }
+        // 舊 sheet 沒這日的資料(理論上不應該,但安全起見) — 仍按規則生
+      }
+
       const day = {morning:[], noon:[], evening:[], attendance:[], off:[]};
 
       // ─── 依日期套用區間 (from/to) ────────────────────────────────
@@ -7943,11 +7985,12 @@ async function autoGenerate(){
   }
 
   hideLoading();
+  const preservedHint = preservedDayCount > 0 ? ` (已保留 ${preservedDayCount} 天既有異動紀錄)` : '';
   if(issues.length){
-    toast(`已生成 ${targetPeriods.length} 個區間,但有 ${issues.length} 天人數不符規則`,'warn');
+    toast(`已生成 ${targetPeriods.length} 個區間,但有 ${issues.length} 天人數不符規則${preservedHint}`,'warn');
     console.warn('Schedule issues:', issues.slice(0,20));
   } else {
-    toast(`已為 ${targetPeriods.length} 個區間自動生成班表`);
+    toast(`已為 ${targetPeriods.length} 個區間自動生成班表${preservedHint}`);
   }
   renderBranch();
 }
