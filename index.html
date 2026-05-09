@@ -3792,12 +3792,21 @@ function updateConnStatus(){
 /* =====================================================================
    HOME / NAVIGATION
    ===================================================================== */
-function goHome(){
+function goHome(opts){
+  // opts.clearView (預設 true):清掉 sessionStorage / localStorage 的 view state
+  // 自願返回首頁(按 logo / 麵包屑) → 清掉(預設)
+  // init 失敗 fallback → 不清,讓下次重新整理仍能還原
+  const clearView = !opts || opts.clearView !== false;
   State.currentBranch = null;
   $('homeView').style.display='';
   $('branchView').classList.remove('active');
   switchHomeTab('branches');
-  updateHash();
+  if(clearView){
+    updateHash();   // updateHash 內 currentBranch=null 會清 view state
+  } else {
+    // 不清 view state — 直接清 hash 但保留 localStorage
+    history.replaceState(null, '', location.pathname + location.search);
+  }
 }
 
 function switchHomeTab(name){
@@ -5594,6 +5603,75 @@ function openSwapModal(date, shift, name){
   if(existing){
     // Pre-fill form with existing values
     _swapCtx.existingId = existing.id;
+
+    // ─── 偵測 combo 群組 ───────────────────────────────────────────
+    // 「換班+代班」會建立 3 筆紀錄 (Rec1=swap本班 / Rec2=swap配對 / Rec3=leave代班)
+    // 都共用 [CG:時間戳] 標記。若使用者點到任一筆,以 combo 模式還原 — 顯示完整資訊。
+    const isComboGroup = !!getComboGroupId(existing);
+    if(isComboGroup){
+      // 找出 combo 三筆紀錄 — 自身 + group members
+      const comboMembers = [existing, ...findComboGroupMembers(existing)];
+      // Rec1 = 本班 swap (本日本班 originalName=本班員工 mode=swap)
+      // Rec2 = 配對 swap (對方那班 originalName=partner mode=swap)
+      // Rec3 = 本班代班 (本日本班 originalName=partner mode≠swap)
+      const recBy = (predicate) => comboMembers.find(predicate);
+      const rec1 = recBy(r => r.date === _swapCtx.date && r.shift === _swapCtx.shift && r.mode === 'swap');
+      // partner 名:Rec1 的 swapWith[0]
+      const partner = rec1 && Array.isArray(rec1.swapWith) ? rec1.swapWith[0] : null;
+      const rec2 = partner && recBy(r => r.originalName === partner && r.mode === 'swap' &&
+        !(r.date === _swapCtx.date && r.shift === _swapCtx.shift));
+      const rec3 = partner && recBy(r => r.originalName === partner && r.mode !== 'swap' &&
+        r.date === _swapCtx.date && r.shift === _swapCtx.shift);
+
+      // 切到 combo 原因 + 顯示 combo block
+      $('swapReason').value = '換班+代班';
+      document.querySelectorAll('.reason-pill').forEach(p=>{
+        p.classList.toggle('active', p.dataset.reason === '換班+代班');
+      });
+      applySwapModeUI();   // 會切到 combo block + 呼叫 populateComboBlock 填 partner pills
+
+      // 等 populateComboBlock 把 partner pills 渲染好之後再設值
+      // populateComboBlock 是同步函式,可以直接設
+      if(rec1 && partner){
+        if($('comboPartner')) $('comboPartner').value = partner;
+        const partnerBtn = document.querySelector(`#comboPartnerPills [data-name="${partner}"]`);
+        if(partnerBtn) partnerBtn.classList.add('active');
+        else if($('comboPartnerPills')){
+          // partner 不在當前 employees 列表(可能已離職),仍顯示使用者選擇
+          $('comboPartnerPills').insertAdjacentHTML('beforeend',
+            `<button type="button" class="partner-pill active" data-name="${partner}" onclick="selectComboPartner('${partner}')">${partner} <span style="color:#a83838; font-size:12px;">(資料異常)</span></button>`);
+        }
+      }
+      if(rec2){
+        if($('comboPartnerDate')) $('comboPartnerDate').value = rec2.date || '';
+        if($('comboPartnerShift')) $('comboPartnerShift').value = rec2.shift || '';
+      }
+      if(rec3){
+        if($('comboReason')) $('comboReason').value = rec3.reason || '缺人';
+        // active pill
+        document.querySelectorAll('#comboReasonPills .reason-pill').forEach(p => {
+          p.classList.toggle('active', p.dataset.reason === (rec3.reason || '缺人'));
+        });
+        // coverName 解 "Name (Branch)"
+        const m = String(rec3.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
+        if(m){
+          if($('comboCoverName')) $('comboCoverName').value = m[1].trim();
+          if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('comboCoverBranch')){
+            $('comboCoverBranch').value = m[2].trim();
+          }
+        } else if($('comboCoverName')){
+          $('comboCoverName').value = rec3.coverName || '';
+        }
+        // combo 備註 (剝除 [CG:xxx] 標記)
+        if($('comboNote')) $('comboNote').value = getCleanNote(rec3);
+      }
+      // 顯示「取消設定」按鈕
+      $('swapRestoreBtn').style.display = '';
+      // hint 已由 applySwapModeUI 處理
+      openModal('swapModal');
+      return;
+    }
+
     $('swapReason').value = existing.reason || '換班';
     $('swapNote').value = getCleanNote(existing);
     if(existing.mode === 'swap'){
@@ -6570,11 +6648,12 @@ function applySwapModeUI(){
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
 
-  // 「該日為兩段班」勾選列 — 僅在 leave 模式 + 出勤(12HR) 班別時顯示
+  // 「該日為兩段班」勾選列 — leave 模式都顯示
+  // 12HR(出勤):一格代表整天,可拆早段/晚段不同代班
+  // 一般早晚:該班內分早/晚段不同代班(例:早班 9-12 / 13-17 不同人代)
   const splitToggleRow = $('swapSplitToggleRow');
   if(splitToggleRow){
-    const isAttendance = (_swapCtx && _swapCtx.shift === '出勤');
-    const showSplit = (mode === 'leave') && isAttendance;
+    const showSplit = (mode === 'leave');
     splitToggleRow.style.display = showSplit ? '' : 'none';
     if(!showSplit){
       // 切走時記得清掉勾選 + 還原成單一代班區塊
@@ -6664,10 +6743,21 @@ async function submitSwap(){
     if(partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
       toast('換班日期/班別不可與本班相同','warn'); return;
     }
-    // 編輯既有紀錄不支援 combo (combo 是「一次建多筆」的合併操作,難以對應單一既有紀錄)
+    // 編輯既有 combo 紀錄:先把舊群組(3 筆)從 State 移除,再建立新的 3 筆
     if(_swapCtx.existingId){
-      toast('「換班+代班」不支援編輯既有紀錄,請刪除後重建','warn');
-      return;
+      const oldRec = (State.swaps||[]).find(s => String(s.id) === String(_swapCtx.existingId));
+      if(oldRec){
+        const oldMembers = [oldRec, ...findComboGroupMembers(oldRec)];
+        oldMembers.forEach(rec => {
+          const idx = (State.swaps || []).findIndex(s => s === rec);
+          if(idx >= 0) State.swaps.splice(idx, 1);
+          const rid = String(rec.id || '');
+          if(!rid.startsWith('STMP') && rid){
+            State.pendingDeletions = State.pendingDeletions || [];
+            if(!State.pendingDeletions.includes(rec.id)) State.pendingDeletions.push(rec.id);
+          }
+        });
+      }
     }
     // 換班目標日須在當前 8 週區間內 (與 swap 一致的限制)
     const setting = getCurrentSetting();
@@ -6844,9 +6934,9 @@ async function submitSwap(){
   let coverName = '';
   let splitNotes = null;  // 兩段班時用,個別段的備註
   if(mode === 'leave'){
-    // 偵測「該日為兩段班」勾選狀態
+    // 偵測「該日為兩段班」勾選狀態 (leave 模式都允許,不限 12HR)
     const splitToggle = $('swapSplitToggle');
-    const isSplit = splitToggle && splitToggle.checked && _swapCtx.shift === '出勤';
+    const isSplit = splitToggle && splitToggle.checked;
     if(isSplit){
       // 兩段班:取兩段時段、院區、姓名、各自備註
       const p1 = ($('swapSplitPeriod1').value || '').trim();
@@ -9140,8 +9230,8 @@ async function init(){
   renderBranchGrid();
   applyRole();
   await loadAllData();
-  // Try to restore the previous view from URL hash; if not present, go home
-  if(!restoreFromHash()) goHome();
+  // Try to restore the previous view from URL hash; if not present, go home (但不清 view state,讓下次重整還能還原)
+  if(!restoreFromHash()) goHome({clearView:false});
   if(!State.webAppUrl){
     setTimeout(()=>toast('未設定 Apps Script,目前為本地模式 (資料只存於本機瀏覽器)','warn'), 800);
   } else if(State.connError){
@@ -9149,7 +9239,7 @@ async function init(){
   }
   // Listen for browser back/forward navigation
   window.addEventListener('hashchange', () => {
-    if(!restoreFromHash()) goHome();
+    if(!restoreFromHash()) goHome({clearView:false});
   });
 }
 init();
