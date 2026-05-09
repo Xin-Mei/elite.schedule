@@ -5920,7 +5920,10 @@ function confirmQuickSwapPick(targetName, targetGroup){
   // 因為若該格已有 swap (例:5/10 早原盈諼,先前換給季帆),displayName 是季帆,
   // sheet 中該 cell 仍是盈諼 — record 的 originalName 必須用 sheet 中的真正人
   const setting = getCurrentSetting();
-  const sched = State.schedules[`${State.currentBranch}_${State.currentPosition}_${setting.periods[State.currentPeriodIndex].startDate}`];
+  // 注意:State.schedules 的 key 用「雙底線」分隔 (見 loadAllData 中的寫入邏輯),
+  // 之前用單底線會永遠找不到 sched → originalName 會 fallback 為 displayName,
+  // 導致建立的 swap record originalName 對不到 sheet 中真正的人 → swap 不生效。
+  const sched = State.schedules[`${State.currentBranch}__${State.currentPosition}__${setting.periods[State.currentPeriodIndex].startDate}`];
   const SHIFT_KEYS = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
   const sk = SHIFT_KEYS[shift];
   let originalName = name;
