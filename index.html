@@ -2591,7 +2591,7 @@
       <span class="qs-icon">⇄</span>
       <div>
         <div class="qs-title">快速換班模式 · 已啟用</div>
-        <div class="qs-sub" id="quickSwapStatus">請點選第一格</div>
+        <div class="qs-sub">點任一班別 → 選擇要換成哪位員工 (單向換班)</div>
       </div>
     </div>
     <button class="btn" onclick="toggleQuickSwap()" style="background:#fff;">關閉模式</button>
@@ -3022,42 +3022,32 @@
   </div>
 </div>
 
-<!-- ========== Quick Swap 確認 Modal ========== -->
-<div class="modal-back" id="quickSwapConfirmModal">
-  <div class="modal" style="max-width:540px;">
+<!-- ========== Quick Swap 員工選單 Modal (單向換班) ========== -->
+<div class="modal-back" id="quickSwapPickerModal">
+  <div class="modal" style="max-width:560px;">
     <div class="modal-head">
-      <h3>⇄ 快速換班確認</h3>
-      <button class="modal-close" onclick="cancelQuickSwapConfirm()">×</button>
+      <h3>⇄ 快速換班</h3>
+      <button class="modal-close" onclick="closeModal('quickSwapPickerModal')">×</button>
     </div>
     <div class="modal-body">
-      <div style="background: linear-gradient(135deg, #f5fbfa 0%, #e8f4f3 100%); padding:18px 22px; border-radius:12px; border:1px solid var(--teal-300); margin-bottom:18px;">
-        <div style="display:flex; align-items:center; justify-content:space-around; gap:16px;">
-          <div style="text-align:center; flex:1;">
-            <div style="font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">第一格</div>
-            <div id="qsConfirmCell1Date" style="font-family:'Noto Sans TC',sans-serif; font-size:18px; font-weight:700; color:var(--teal-900);">—</div>
-            <div id="qsConfirmCell1Shift" style="font-size:13px; color:var(--teal-800); margin-top:2px;">—</div>
-            <div id="qsConfirmCell1Name" style="font-family:'Noto Serif TC',serif; font-size:17px; font-weight:600; color:var(--teal-900); margin-top:6px; letter-spacing:2px;">—</div>
-          </div>
-          <div style="font-size:36px; color:var(--teal-700); flex-shrink:0;">⇄</div>
-          <div style="text-align:center; flex:1;">
-            <div style="font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">第二格</div>
-            <div id="qsConfirmCell2Date" style="font-family:'Noto Sans TC',sans-serif; font-size:18px; font-weight:700; color:var(--teal-900);">—</div>
-            <div id="qsConfirmCell2Shift" style="font-size:13px; color:var(--teal-800); margin-top:2px;">—</div>
-            <div id="qsConfirmCell2Name" style="font-family:'Noto Serif TC',serif; font-size:17px; font-weight:600; color:var(--teal-900); margin-top:6px; letter-spacing:2px;">—</div>
-          </div>
+      <div style="background: linear-gradient(135deg, #f5fbfa 0%, #e8f4f3 100%); padding:14px 18px; border-radius:10px; border:1px solid var(--teal-300); margin-bottom:18px;">
+        <div style="font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">當前班別</div>
+        <div style="display:flex; align-items:baseline; gap:10px;">
+          <span id="qsPickerCellDate" style="font-family:'Noto Sans TC',sans-serif; font-size:20px; font-weight:700; color:var(--teal-900);">—</span>
+          <span id="qsPickerCellShift" style="font-size:14px; color:var(--teal-800);">—</span>
+          <span style="color:var(--muted);">·</span>
+          <span id="qsPickerCellName" style="font-family:'Noto Serif TC',serif; font-size:18px; font-weight:600; color:var(--teal-900); letter-spacing:2px;">—</span>
         </div>
       </div>
-      <div class="form-row">
-        <label>備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-        <input type="text" id="qsConfirmNote" placeholder="附註說明 (選填)"/>
+      <div style="font-size:13px; color:var(--muted); margin-bottom:10px; letter-spacing:1px;">
+        請選擇要換成哪位員工 (單向換班 — 對方那天班不變動,可能造成上班日不平衡)
       </div>
-      <div style="font-size:13px; color:var(--muted); margin-top:6px; padding:8px 12px; background:#f4f1e8; border-radius:6px;">
-        💡 送出後系統會自動建立 2 筆換班紀錄(雙向),班表顯示為灰底黑字。
+      <div id="qsPickerEmployeeList" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+        <!-- Filled by openQuickSwapPickerModal -->
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn" onclick="cancelQuickSwapConfirm()">取消</button>
-      <button class="btn primary" onclick="submitQuickSwap()">送　出</button>
+      <button class="btn" onclick="closeModal('quickSwapPickerModal')">取消</button>
     </div>
   </div>
 </div>
@@ -3169,6 +3159,21 @@
               style="display:none; margin-top:18px; background:var(--teal-700); color:#fff; border:0; padding:8px 24px; border-radius:8px; cursor:pointer; font-family:inherit; font-size:14px; letter-spacing:2px;">
         關　閉
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== Confirm Modal (yes/no, 用 Promise 等待回應) ========== -->
+<div class="modal-back" id="confirmModal" style="z-index:200;">
+  <div class="modal" style="max-width:520px; border:2px solid #d18a3d; box-shadow: 0 20px 60px rgba(190,140,60,0.25);">
+    <div class="modal-body" style="padding:28px 28px 14px; text-align:center;">
+      <div id="confirmModalIcon" style="font-size:48px; margin-bottom:10px;">⚠️</div>
+      <h3 id="confirmModalTitle" style="margin:0 0 14px; font-family:'Noto Serif TC',serif; color:#a83838; letter-spacing:2px; font-size:20px;">請確認</h3>
+      <div id="confirmModalMsg" style="color:var(--ink); line-height:1.7; font-size:14px; padding:0 4px;"></div>
+    </div>
+    <div class="modal-foot" style="justify-content:center; gap:12px;">
+      <button id="confirmModalCancelBtn" class="btn" onclick="_confirmModalResolve(false)">取消</button>
+      <button id="confirmModalConfirmBtn" class="btn primary" onclick="_confirmModalResolve(true)">確定</button>
     </div>
   </div>
 </div>
@@ -3610,6 +3615,94 @@ function closeAlertModal(){
   closeModal('alertModal');
 }
 
+// ─── Confirm Modal (yes/no) ──────────────────────────────────
+// 用 promise 包,呼叫端可以 await 取得 true/false
+let _confirmResolver = null;
+function showConfirmModal(htmlMsg, opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    _confirmResolver = resolve;
+    $('confirmModalIcon').textContent = opts.icon || '⚠️';
+    $('confirmModalTitle').textContent = opts.title || '請確認';
+    $('confirmModalMsg').innerHTML = htmlMsg;
+    $('confirmModalConfirmBtn').textContent = opts.confirmText || '確定';
+    $('confirmModalCancelBtn').textContent = opts.cancelText || '取消';
+    openModal('confirmModal');
+  });
+}
+function _confirmModalResolve(value){
+  if(_confirmResolver){
+    _confirmResolver(value);
+    _confirmResolver = null;
+  }
+  closeModal('confirmModal');
+}
+
+// ─── 偵測單向換班造成的上班日不平衡 ─────────────────────────────
+// 檢查所有未儲存的 swap 紀錄,找出沒配對的單向換班,
+// 計算每位員工受到的工時影響(增加/減少天數)
+function detectWorkBalanceIssues(unsavedRecords){
+  // 把 unsaved 的 swap 加到目前 State.swaps 裡一起算 (它們已經在 State.swaps 裡了,
+  // 因為 _unsaved 是 flag 不是分開存)
+  // 直接掃所有 swap mode 的紀錄,找出沒配對的
+  const allSwaps = (State.swaps || []).filter(s => s.mode === 'swap');
+  // 按 (branch, position) 分組
+  const byBranchPos = {};
+  allSwaps.forEach(s => {
+    const key = `${s.branch}|${s.position}`;
+    if(!byBranchPos[key]) byBranchPos[key] = [];
+    byBranchPos[key].push(s);
+  });
+
+  const warnings = [];
+  Object.keys(byBranchPos).forEach(key => {
+    const [branch, position] = key.split('|');
+    const swaps = byBranchPos[key];
+    // 計算每個員工的工時 delta (按 group → name 累加)
+    // 規則:
+    //   • 單向換班(沒配對) → originalName -1 天, 目標員工 +1 天
+    //   • 雙向換班(有配對) → 0 (整體中性,不警示)
+    const delta = {};   // name → delta
+    const usedSet = new Set();
+    swaps.forEach(s => {
+      if(usedSet.has(s)) return;
+      const partner = s.swapWith && s.swapWith[0];
+      if(!partner) return;
+      // 找配對(同 branch+position+createdAt 5 秒內 + 互換 originalName)
+      const paired = swaps.find(o =>
+        o !== s && !usedSet.has(o) &&
+        o.originalName === partner &&
+        Array.isArray(o.swapWith) && o.swapWith[0] === s.originalName &&
+        Math.abs(new Date(o.createdAt) - new Date(s.createdAt)) < 5000
+      );
+      if(paired){
+        // 雙向 — 中性
+        usedSet.add(s);
+        usedSet.add(paired);
+      } else {
+        // 單向 — originalName -1, partner +1
+        delta[s.originalName] = (delta[s.originalName] || 0) - 1;
+        delta[partner] = (delta[partner] || 0) + 1;
+        usedSet.add(s);
+      }
+    });
+    // 列出有非零 delta 的員工
+    const affected = Object.entries(delta).filter(([n, d]) => d !== 0);
+    if(affected.length){
+      // 依當前職位設定決定單位
+      const setting = ((State.settings || {})[branch] || {})[position];
+      const hasAttendance = setting && setting.rules && setting.rules.attendanceCount > 0;
+      const unit = hasAttendance ? '天' : '班';
+      affected.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+      affected.forEach(([n, d]) => {
+        const sign = d > 0 ? '+' : '';
+        warnings.push(`<b>${branch}·${position}</b> · ${n}: ${sign}${d} ${unit}`);
+      });
+    }
+  });
+  return warnings;
+}
+
 // 點字卡 -N 徽章 → 顯示該組的明細 (按原因分類聚合,例:私事支援 1 班、缺人 15 班)
 function showOffDetails(group, kind, evt){
   if(evt){ evt.stopPropagation(); }
@@ -4009,7 +4102,6 @@ function goHome(opts){
   // 退出快速換班模式
   if(State.quickSwap && State.quickSwap.active){
     State.quickSwap.active = false;
-    State.quickSwap.first = null;
     applyQuickSwapUI();
   }
   State.currentBranch = null;
@@ -4097,7 +4189,6 @@ function switchBranch(name){
   // 切院區時若快速換班模式啟用,自動退出
   if(State.quickSwap && State.quickSwap.active){
     State.quickSwap.active = false;
-    State.quickSwap.first = null;
     applyQuickSwapUI();
   }
   // 切換時保留目前職位的選擇,但若該職位在新院區被設為隱藏,則交給 renderPositionBar 自動 fallback
@@ -4274,7 +4365,6 @@ function renderPositionBar(){
       // 切職位時若快速換班模式啟用,自動退出(避免跨職位選 cell 造成混淆)
       if(State.quickSwap && State.quickSwap.active){
         State.quickSwap.active = false;
-        State.quickSwap.first = null;
         applyQuickSwapUI();
       }
       renderPositionBar();
@@ -5035,13 +5125,6 @@ async function onPartTimeSlotClick(date, shiftKey, shiftLabel){
 }
 
 function changePeriod(delta){
-  // 切區間時若快速換班模式啟用,清掉第一格選取(模式仍維持但選取重置)
-  // 因為跨區間選 cell 會造成混淆
-  if(State.quickSwap && State.quickSwap.active){
-    State.quickSwap.first = null;
-    document.querySelectorAll('.name-pill.qs-selected').forEach(el => el.classList.remove('qs-selected'));
-    if(typeof updateQuickSwapStatus === 'function') updateQuickSwapStatus();
-  }
   // 工讀職位:以月為單位前後切換
   if(State.currentPosition === '工讀'){
     if(!State.partTimeMonth){
@@ -5545,9 +5628,14 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       const splitCovers = isSplitSwap(swap) ? swap.swapWith : null;
       // The cell shows the COVER name (or the swap-target person), with mode coloring
       let pillContent, modeClass;
+      // displayName = 該 cell 畫面上實際顯示的「人」(供快速換班使用)
+      // 一般情況 displayName === n (原排班員工);
+      // 但若已被 swap → displayName 是換進來的人;若被 leave/support → 是代班人員
+      let displayName = n;
       if(swap.mode === 'swap'){
         // 換班:顯示換進來的人,僅顏色標示,不加文字
         pillContent = (swap.swapWith && swap.swapWith[0]) || n;
+        displayName = pillContent;
         modeClass = 'mode-swap';
       } else if(splitCovers){
         // 兩段班:依時段順序顯示兩段代班 (時段標籤 + 姓名 + 院區+備註)
@@ -5607,11 +5695,13 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       const tip = isAdmin
         ? `${swap.reason} · 原 ${n}` + (noteText ? ` · ${noteText}` : '')
         : `代班 · 原 ${n}`;
-      return `<span class="name-pill ${modeClass}" title="${tip}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${pillContent}${noteHtml}</span>`;
+      // data-display-name = 畫面上實際顯示的人(供快速換班用),
+      // onclick 仍傳原 n 以維持既有 swap/edit 流程
+      return `<span class="name-pill ${modeClass}" title="${tip}" data-display-name="${displayName}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${pillContent}${noteHtml}</span>`;
     }
 
     let cls = 'name-pill '+g;
-    return `<span class="${cls}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${n}</span>`;
+    return `<span class="${cls}" data-display-name="${n}" onclick="onCellClick('${dateStr}','${shift}','${n}', event)">${n}</span>`;
   }).join(' ');
 }
 
@@ -5702,7 +5792,17 @@ function onCellClick(date, shift, name, evt){
   // 有編輯權限 (admin 全院區 / manager 在指定院區) → 直接打開編輯 modal
   // 但若快速換班模式啟用,改走快速換班流程
   if(State.quickSwap && State.quickSwap.active){
-    handleQuickSwapClick(date, shift, name);
+    // 快速換班用「畫面上實際顯示的人」當第一格姓名
+    // 因為 cell 可能已被前一輪換班占用,onCellClick 傳的 name 是原排班員工(sheet 中的),
+    // 不是當前畫面顯示的人。例:5/10 早原本盈諼,前一輪換給季帆,
+    // 現在 cell 上顯示「季帆」但 onclick 傳的 n 仍是「盈諼」。
+    // 快速換班視覺上應該以「目前顯示的人」為依據。
+    let displayName = name;
+    const targetEl = evt && evt.target ? evt.target.closest('.name-pill') : null;
+    if(targetEl && targetEl.dataset && targetEl.dataset.displayName){
+      displayName = targetEl.dataset.displayName;
+    }
+    handleQuickSwapClick(date, shift, displayName);
     return;
   }
   openSwapModal(date, shift, name);
@@ -5728,7 +5828,6 @@ function toggleQuickSwap(){
     return;
   }
   State.quickSwap.active = !State.quickSwap.active;
-  State.quickSwap.first = null;
   applyQuickSwapUI();
 }
 
@@ -5744,7 +5843,6 @@ function applyQuickSwapUI(){
       btn.style.borderColor = 'var(--teal-700)';
       btn.textContent = '⇄ 快速換班 (啟用中)';
     }
-    updateQuickSwapStatus();
   } else {
     document.body.classList.remove('quickswap-mode');
     if(banner) banner.style.display = 'none';
@@ -5754,20 +5852,6 @@ function applyQuickSwapUI(){
       btn.style.borderColor = '';
       btn.textContent = '⇄ 快速換班';
     }
-    // 清除任何選取標記
-    document.querySelectorAll('.name-pill.qs-selected').forEach(el => el.classList.remove('qs-selected'));
-  }
-}
-
-function updateQuickSwapStatus(){
-  const statusEl = $('quickSwapStatus');
-  if(!statusEl) return;
-  const f = State.quickSwap.first;
-  if(!f){
-    statusEl.textContent = '請點選第一格';
-  } else {
-    const dateMd = f.date.slice(5).replace('-','/');
-    statusEl.innerHTML = `已選 ① <b>${dateMd}</b> ${f.shift}班 <b>${f.name}</b> · 請點選第二格`;
   }
 }
 
@@ -5777,12 +5861,11 @@ function handleQuickSwapClick(date, shift, name){
     toast('過去日期不可換班','warn');
     return;
   }
-  // 該 cell 已有非 swap 紀錄(紅底/黃底) — 擋,避免衝突
+  // 該 cell (date+shift) 已有任何非 swap 紀錄(紅底/黃底) — 擋,避免衝突
   const existing = (State.swaps || []).find(s =>
     s.branch === State.currentBranch &&
     s.position === State.currentPosition &&
     s.date === date && s.shift === shift &&
-    s.originalName === name &&
     s.mode !== 'swap'
   );
   if(existing){
@@ -5792,118 +5875,135 @@ function handleQuickSwapClick(date, shift, name){
   // 無姓名(空格)不可選
   if(!name){ toast('空白格不可選','warn'); return; }
 
-  const f = State.quickSwap.first;
-  if(!f){
-    // 設為第一格
-    State.quickSwap.first = {date, shift, name};
-    markCellSelected(date, shift, name);
-    updateQuickSwapStatus();
-    return;
-  }
-  // 點到同一格 → 取消選取
-  if(f.date === date && f.shift === shift && f.name === name){
-    State.quickSwap.first = null;
-    document.querySelectorAll('.name-pill.qs-selected').forEach(el => el.classList.remove('qs-selected'));
-    updateQuickSwapStatus();
-    return;
-  }
-  // 同人不可換給自己
-  if(f.name === name){
-    toast('不可選擇同一人,請選別位員工','warn');
-    return;
-  }
-  // 第一格與第二格組成換班 — 跳確認 modal
-  openQuickSwapConfirm(f, {date, shift, name});
+  // 跳出「換成誰」員工選單
+  openQuickSwapPickerModal(date, shift, name);
 }
 
 function markCellSelected(date, shift, name){
   // 找該 cell 的 name-pill,加 qs-selected class
-  // td 沒有 data-attr,只能用 innerHTML 比對 — 實際上每個 cell 只有一個 .name-pill
-  // 我們透過遍歷 schedule 中的 onclick 字串找 (可靠但稍 hacky)
+  // 用 data-display-name 比對(畫面上顯示的人) + onclick 中的 date/shift
   document.querySelectorAll('table.schedule .name-pill').forEach(el => {
     const onclickStr = el.getAttribute('onclick') || '';
-    // onclick 格式:onCellClick('YYYY-MM-DD','早','姓名', event)
-    if(onclickStr.includes(`'${date}'`) && onclickStr.includes(`'${shift}'`) && onclickStr.includes(`'${name}'`)){
+    const displayName = el.dataset && el.dataset.displayName;
+    if(onclickStr.includes(`'${date}'`) && onclickStr.includes(`'${shift}'`) && displayName === name){
       el.classList.add('qs-selected');
     }
   });
 }
 
+// 暫存當前要換班的 cell 資訊 (供 picker modal 使用)
 let _quickSwapPending = null;
-function openQuickSwapConfirm(cell1, cell2){
-  _quickSwapPending = {cell1, cell2};
+
+function openQuickSwapPickerModal(date, shift, name){
+  _quickSwapPending = {date, shift, name};
+  // Header 顯示當前 cell
   const fmtDate = ds => ds.slice(5).replace('-','/');
-  $('qsConfirmCell1Date').textContent = fmtDate(cell1.date);
-  $('qsConfirmCell1Shift').textContent = cell1.shift + '班';
-  $('qsConfirmCell1Name').textContent = cell1.name;
-  $('qsConfirmCell2Date').textContent = fmtDate(cell2.date);
-  $('qsConfirmCell2Shift').textContent = cell2.shift + '班';
-  $('qsConfirmCell2Name').textContent = cell2.name;
-  $('qsConfirmNote').value = '';
-  openModal('quickSwapConfirmModal');
+  $('qsPickerCellDate').textContent = fmtDate(date);
+  $('qsPickerCellShift').textContent = shift + '班';
+  $('qsPickerCellName').textContent = name;
+  // 列出同院區同職位員工 (排除當前 cell 顯示的人)
+  const setting = getCurrentSetting();
+  const emps = (setting.employees || []).filter(e => e.name && e.name !== name);
+  const listEl = $('qsPickerEmployeeList');
+  if(!emps.length){
+    listEl.innerHTML = `<div style="color:var(--muted); padding:12px; font-size:13px;">此職位沒有其他員工可換</div>`;
+  } else {
+    listEl.innerHTML = emps.map(e => `
+      <button class="btn" type="button" onclick="confirmQuickSwapPick('${e.name}', '${e.group||''}')"
+              style="display:flex; align-items:center; gap:8px; padding:10px 16px; min-width:100px; background:var(--${e.group||'A'}-bg); border:1px solid rgba(0,0,0,0.06);">
+        <span style="font-size:11px; letter-spacing:2px; color:var(--muted);">${e.group||''}</span>
+        <span style="font-family:'Noto Serif TC',serif; font-size:16px; font-weight:600; color:var(--teal-900); letter-spacing:2px;">${e.name}</span>
+      </button>
+    `).join('');
+  }
+  openModal('quickSwapPickerModal');
 }
 
-function cancelQuickSwapConfirm(){
-  closeModal('quickSwapConfirmModal');
-  _quickSwapPending = null;
-  // 清除選取標記但不退出模式 — 使用者可再選
-  State.quickSwap.first = null;
-  document.querySelectorAll('.name-pill.qs-selected').forEach(el => el.classList.remove('qs-selected'));
-  updateQuickSwapStatus();
-}
-
-function submitQuickSwap(){
+// 使用者點某員工按鈕 → 直接建立單向 swap record
+function confirmQuickSwapPick(targetName, targetGroup){
   if(!_quickSwapPending){
     toast('快速換班狀態異常','error');
-    closeModal('quickSwapConfirmModal');
+    closeModal('quickSwapPickerModal');
     return;
   }
-  const {cell1, cell2} = _quickSwapPending;
-  const note = ($('qsConfirmNote').value || '').trim();
+  const {date, shift, name} = _quickSwapPending;
+  // 取得「該 cell sheet 中真正的原排班員工」
+  // 因為若該格已有 swap (例:5/10 早原盈諼,先前換給季帆),displayName 是季帆,
+  // sheet 中該 cell 仍是盈諼 — record 的 originalName 必須用 sheet 中的真正人
+  const setting = getCurrentSetting();
+  const sched = State.schedules[`${State.currentBranch}_${State.currentPosition}_${setting.periods[State.currentPeriodIndex].startDate}`];
+  const SHIFT_KEYS = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  const sk = SHIFT_KEYS[shift];
+  let originalName = name;
+  if(sched && sched.shifts && sched.shifts[date] && sk){
+    const arr = sched.shifts[date][sk] || [];
+    if(arr.length > 0) originalName = arr[0];
+  }
+
+  // 偵測該 cell 是否已有舊 swap (mode=swap, 同 originalName) — 若有,需先取代
+  // 因為兩筆 swap on 同一格同一原 originalName 會打架
+  // 同時也找配對的另一筆 (若是先前的雙向換班,連帶取消對方那筆)
+  const oldSwap = (State.swaps || []).find(s =>
+    s.branch === State.currentBranch &&
+    s.position === State.currentPosition &&
+    s.date === date && s.shift === shift &&
+    s.originalName === originalName &&
+    s.mode === 'swap'
+  );
+  let oldPaired = null;
+  if(oldSwap){
+    const partner = oldSwap.swapWith && oldSwap.swapWith[0];
+    if(partner){
+      oldPaired = (State.swaps || []).find(o =>
+        o !== oldSwap &&
+        o.mode === 'swap' &&
+        o.branch === oldSwap.branch &&
+        o.position === oldSwap.position &&
+        o.originalName === partner &&
+        Array.isArray(o.swapWith) && o.swapWith[0] === oldSwap.originalName &&
+        Math.abs(new Date(o.createdAt) - new Date(oldSwap.createdAt)) < 5000
+      );
+    }
+  }
+  // 把舊的從 State.swaps 移除 + 加入 pendingDeletions (若 sheet 中已存在)
+  [oldSwap, oldPaired].filter(Boolean).forEach(rec => {
+    const idx = (State.swaps || []).findIndex(s => s === rec);
+    if(idx >= 0) State.swaps.splice(idx, 1);
+    const rid = String(rec.id || '');
+    if(!rid.startsWith('STMP') && rid){
+      State.pendingDeletions = State.pendingDeletions || [];
+      if(!State.pendingDeletions.includes(rec.id)) State.pendingDeletions.push(rec.id);
+    }
+  });
+
+  // 建立單向 swap record (沒有配對 — 故意造成工時不平衡,讓警示系統提醒)
   const baseTime = Date.now();
-  const sharedCreatedAt = new Date().toISOString();
-  // 建立雙向 2 筆 record (與一般 swap mode 一樣的格式)
-  const rec1 = {
+  const newRec = {
     id: 'STMP' + baseTime + Math.floor(Math.random()*100),
     branch: State.currentBranch,
     position: State.currentPosition,
-    date: cell1.date,
-    shift: cell1.shift,
-    originalName: cell1.name,
+    date: date,
+    shift: shift,
+    originalName: originalName,
     reason: '換班',
     mode: 'swap',
-    swapWith: [cell2.name],
-    coverName: '',
-    note: note,
-    createdAt: sharedCreatedAt,
-    _unsaved: true,
-  };
-  const rec2 = {
-    id: 'STMP' + (baseTime+1) + Math.floor(Math.random()*100),
-    branch: State.currentBranch,
-    position: State.currentPosition,
-    date: cell2.date,
-    shift: cell2.shift,
-    originalName: cell2.name,
-    reason: '換班',
-    mode: 'swap',
-    swapWith: [cell1.name],
+    swapWith: [targetName],
     coverName: '',
     note: '',
-    createdAt: sharedCreatedAt,
+    createdAt: new Date().toISOString(),
     _unsaved: true,
   };
   State.swaps = State.swaps || [];
-  State.swaps.push(rec1, rec2);
+  State.swaps.push(newRec);
 
-  closeModal('quickSwapConfirmModal');
+  closeModal('quickSwapPickerModal');
   _quickSwapPending = null;
-  // 清除選取狀態並保持快速換班模式 (使用者可能要連續換多組)
-  State.quickSwap.first = null;
+  // 重繪 + 維持快速換班模式 (使用者可能要連續換多組)
   renderBranch();
   if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
-  applyQuickSwapUI();   // 重新套用 mode UI (renderBranch 會覆寫 cell HTML,需要再標記)
-  toast(`快速換班已建立 (${cell1.date.slice(5).replace('-','/')} ⇄ ${cell2.date.slice(5).replace('-','/')}, 待儲存)`);
+  applyQuickSwapUI();
+  const replacedHint = (oldSwap || oldPaired) ? ' (已取代舊換班)' : '';
+  toast(`已換班:${date.slice(5).replace('-','/')} ${shift} → ${targetName}${replacedHint} (待儲存)`);
 }
 
 // 判斷某 YYYY-MM-DD 日期是否早於今天 (純日期比較,不含時間)
@@ -7557,6 +7657,30 @@ async function flushUnsavedChanges(){
     toast('沒有待儲存的變更');
     return;
   }
+
+  // ─── 儲存前工時檢核 ─────────────────────────────────────────────
+  // 偵測「單向換班」(沒配對的 swap) — 會造成上班日不平衡
+  // 列出受影響的員工,跳警示讓管理員確認
+  const imbalanceWarnings = detectWorkBalanceIssues(unsaved);
+  if(imbalanceWarnings.length){
+    const html = `
+      <div style="text-align:left; font-size:14px; line-height:1.7;">
+        <div style="margin-bottom:10px; color:#a83838; font-weight:600;">⚠️ 偵測到上班日不平衡:</div>
+        ${imbalanceWarnings.map(w => `<div style="padding:6px 10px; margin-bottom:6px; background:#fef3c7; border-radius:6px;">${w}</div>`).join('')}
+        <div style="margin-top:12px; font-size:13px; color:var(--muted);">
+          仍要繼續儲存嗎?
+        </div>
+      </div>
+    `;
+    const proceed = await showConfirmModal(html, {
+      icon: '⚠️',
+      title: '工時不平衡確認',
+      confirmText: '仍要儲存',
+      cancelText: '取消'
+    });
+    if(!proceed) return;
+  }
+
   showLoading(`儲存中… (${unsaved.length + deletions.length} 筆)`);
 
   // 1. Delete records that were edited or removed
