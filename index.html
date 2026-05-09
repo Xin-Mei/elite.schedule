@@ -5778,6 +5778,24 @@ function onCellClick(date, shift, name, evt){
       );
       return;
     }
+    // 員工身分:只能對「自己」的 cell 申請異動,不能代別人申請
+    // (manager 不可編輯院區的場景也走這邊,但 manager 沒有對應排班員工 → 直接擋)
+    if(State.user && State.user.role === 'employee'){
+      if(!isCurrentEmployee(name)){
+        showAlertModal(
+          '此班別不是您的排班,無法申請異動。<br><br>員工只能針對自己的排班進行調整。',
+          { icon: '🔒', title: '非本人排班', duration: 4000 }
+        );
+        return;
+      }
+    } else if(State.user && State.user.role === 'manager'){
+      // manager 沒編輯權限的院區 → 跟員工一樣只能「看」,不能申請
+      showAlertModal(
+        '您僅有部分院區的編輯權限,此院區僅供瀏覽。<br><br>如需申請異動,請聯繫該院區管理員。',
+        { icon: '🔒', title: '院區無編輯權限', duration: 4000 }
+      );
+      return;
+    }
     openApplyModal({date, shift, name, branch: State.currentBranch, position: State.currentPosition});
     return;
   }
@@ -6918,6 +6936,14 @@ async function submitApply(){
 
   if(!name){ toast('找不到對應的申請人','warn'); return; }
   if(!date || !branch || !position || !shift){ toast('資料不完整','warn'); return; }
+
+  // 員工身分:再次保險 — 只允許對自己的 cell 申請 (UI 已擋,此處避免被繞過)
+  if(State.user && State.user.role === 'employee'){
+    if(!isCurrentEmployee(name)){
+      toast('您只能針對自己的排班進行調整','warn');
+      return;
+    }
+  }
 
   // 員工/訪客身分:擋掉過去日期的申請 (今日之前)
   if(State.user.role !== 'admin'){
@@ -9625,6 +9651,33 @@ function canEditBranch(branchName){
 // 便捷:檢查當前 (State.currentBranch) 是否可編輯
 function canEditCurrentBranch(){
   return canEditBranch(State.currentBranch);
+}
+
+// 取得當前登入員工「在排班表上對應的顯示姓名」
+//   員工 DB B 欄(姓名) 是全名 (例:「莊宛諼」),
+//   但排班表 cell 上顯示的是後兩字 (例:「宛諼」),
+//   所以要把 user.name 截斷成後兩字才能跟 cell name 比對。
+//   姓名 ≤ 2 字 → 保留全名 (例:「高歡」維持「高歡」)
+function getEmployeeDisplayName(){
+  const u = State.user || {};
+  if(!u.name) return '';
+  const fullName = String(u.name).trim();
+  if(fullName.length <= 2) return fullName;
+  return fullName.slice(-2);   // 後 2 字
+}
+
+// 判斷 cell 上的人 (cellName) 是否為當前登入員工本人
+//   兩種比法:
+//     1. 直接相等 (例:user.name='高歡', cellName='高歡')
+//     2. user 的「後 2 字」 = cellName (例:user.name='莊宛諼', cellName='宛諼')
+function isCurrentEmployee(cellName){
+  if(!cellName) return false;
+  const u = State.user || {};
+  if(!u.name) return false;
+  const fullName = String(u.name).trim();
+  if(fullName === cellName) return true;
+  if(fullName.length > 2 && fullName.slice(-2) === cellName) return true;
+  return false;
 }
 
 // 守護函式:呼叫前檢查是否能編輯當前院區。若不行,跳出提示並回傳 false
