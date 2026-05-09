@@ -6648,12 +6648,12 @@ function applySwapModeUI(){
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
 
-  // 「該日為兩段班」勾選列 — leave 模式都顯示
-  // 12HR(出勤):一格代表整天,可拆早段/晚段不同代班
-  // 一般早晚:該班內分早/晚段不同代班(例:早班 9-12 / 13-17 不同人代)
+  // 「該日為兩段班」勾選列 — 僅在 leave 模式 + 出勤(12HR) 班別時顯示
+  // (12HR 一格代表整天,可拆早段/晚段不同代班;一般早晚已分開兩 cell,不需勾選)
   const splitToggleRow = $('swapSplitToggleRow');
   if(splitToggleRow){
-    const showSplit = (mode === 'leave');
+    const isAttendance = (_swapCtx && _swapCtx.shift === '出勤');
+    const showSplit = (mode === 'leave') && isAttendance;
     splitToggleRow.style.display = showSplit ? '' : 'none';
     if(!showSplit){
       // 切走時記得清掉勾選 + 還原成單一代班區塊
@@ -7101,7 +7101,11 @@ function updateUnsavedBanner(){
   const total = unsavedCount + delCount;
   // Always show for admin/manager — but visual state differs
   banner.classList.add('show');
-  $('unsavedCount').textContent = total;
+  // 注意:不能直接 $('unsavedCount').textContent = total
+  // 因為初始 HTML 的 unsavedTitle 預設文字「批次儲存模式 (管理員)」並沒有 #unsavedCount span,
+  // 第一次呼叫時會找不到 → throw NullError → 中斷整個 loadAllData 流程,
+  // 導致重新整理時 init 失敗,沒能執行 restoreFromHash → 回到首頁。
+  // 改為先寫 innerHTML(會自動建立 span),再(可選)更新 textContent。
   if(total > 0){
     banner.classList.remove('idle');
     $('unsavedTitle').innerHTML = `您有 <span id="unsavedCount">${total}</span> 筆未儲存的變更`;
