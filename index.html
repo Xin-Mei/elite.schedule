@@ -594,6 +594,13 @@
     margin-left:4px;
     align-self:center;
     line-height:1.4;
+    cursor:pointer;
+    transition: all .15s ease;
+  }
+  .summary-card .leave-add:hover{
+    background:#fbd5d5;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(168,56,56,0.2);
   }
   .summary-card .leave-add.minus{
     background:#e3f0ec;
@@ -3455,6 +3462,54 @@ function showAlertModal(msg, opts){
   }, dur);
 }
 
+// 點字卡 -N 徽章 → 顯示該組的明細 (按原因分類聚合,例:私事支援 1 天、缺人 15 天)
+function showOffDetails(group, kind, evt){
+  if(evt){ evt.stopPropagation(); }
+  const details = (State._offDetailsByGroup || {})[group] || [];
+  if(!details.length){
+    showAlertModal('此組尚無相關明細', { icon: 'ℹ️', title: '無明細' });
+    return;
+  }
+  // 過濾出 leave/support 類紀錄(不含 swap 的)
+  const leaveKind = details.filter(d => d.mode === 'leave' || d.mode === 'support');
+  if(!leaveKind.length){
+    showAlertModal('此組尚無假別/支援明細', { icon: 'ℹ️', title: '無明細' });
+    return;
+  }
+  // 按 reason 分類聚合 — 統計每個原因的天數 + 列出日期
+  const byReason = {};
+  leaveKind.forEach(d => {
+    const reason = d.reason || '其他';
+    if(!byReason[reason]) byReason[reason] = [];
+    byReason[reason].push(d);
+  });
+  // 排序:依天數降序
+  const sortedReasons = Object.keys(byReason).sort((a, b) => byReason[b].length - byReason[a].length);
+  // HTML — 每個 reason 一行,加上日期清單
+  let html = `<div style="text-align:left; font-size:14px; line-height:1.7;">`;
+  html += `<div style="font-size:12px; color:var(--muted); margin-bottom:10px; letter-spacing:1px;">${group} 組 · 共 ${leaveKind.length} 天</div>`;
+  sortedReasons.forEach(reason => {
+    const items = byReason[reason];
+    const dates = items.map(d => {
+      const md = d.date ? d.date.slice(5).replace('-','/') : '';
+      return md;
+    }).join('、');
+    html += `<div style="margin-bottom:8px; padding:6px 10px; background:#fef3c7; border-radius:6px;">
+      <div>
+        <span style="display:inline-block; min-width:90px; font-weight:600; color:var(--teal-800);">${reason}</span>
+        <span style="color:#a83838; font-weight:600;">${items.length} 天</span>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-top:3px; word-break:break-all;">${dates}</div>
+    </div>`;
+  });
+  html += `</div>`;
+  showAlertModal(html, {
+    icon: '📋',
+    title: `${group} 組 假別/支援 明細`,
+    duration: 8000
+  });
+}
+
 function pad(n){return String(n).padStart(2,'0');}
 function fmt(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function fmtMD(d){return (d.getMonth()+1)+'/'+d.getDate();}
@@ -4878,11 +4933,13 @@ function renderSummary(setting, period){
   // 我們**同時用姓名與組別**累積,字卡渲染時讀「該組整體」累積值。
   const offAdjustments = {};       // empName → { leaveDays, swapNetWorkDelta }
   const offAdjByGroup = {};        // group   → { leaveDays, swapNetWorkDelta } (合併該組所有員工)
+  const offDetailsByGroup = {};    // group   → [{date, shift, name, reason, mode, ...}]  供字卡點擊查看明細
   const workAdjustments = {};      // empName → { added: [...] }
   setting.employees.forEach(e=>{
     if(!e.name) return;
     offAdjustments[e.name] = {netOffDelta: 0, leaveDays: 0, swapNetWorkDelta: 0};
     if(!offAdjByGroup[e.group]) offAdjByGroup[e.group] = {leaveDays: 0, swapNetWorkDelta: 0};
+    if(!offDetailsByGroup[e.group]) offDetailsByGroup[e.group] = [];
   });
 
   // 用 swap 紀錄找到「該日該員工屬於哪組」(考慮區間)
@@ -4907,7 +4964,19 @@ function renderSummary(setting, period){
       //   - 原員工該日視為休假,休假日 +1 天
       //   - 代班人 (coverName) 可能不在本院區員工名單中,故不計入本院區任何人的工時
       offAdjustments[orig].leaveDays += 1;
-      if(grp && offAdjByGroup[grp]) offAdjByGroup[grp].leaveDays += 1;
+      if(grp && offAdjByGroup[grp]){
+        offAdjByGroup[grp].leaveDays += 1;
+        // 收集明細(供字卡點擊查看)
+        if(!offDetailsByGroup[grp]) offDetailsByGroup[grp] = [];
+        offDetailsByGroup[grp].push({
+          date: s.date,
+          shift: s.shift,
+          originalName: orig,
+          reason: s.reason || (s.mode === 'support' ? '私事支援' : '請假'),
+          mode: s.mode,
+          coverName: s.coverName || ''
+        });
+      }
     } else if(s.mode === 'swap'){
       // 特殊情境:**同日早晚互換** (A 的早班 ↔ 畇筑的晚班,且都在同一天)
       // → 兩人當天上班數仍各為 1,工時整體中性,**不顯示警示**(維持 1 換 1 規則)
@@ -4936,7 +5005,19 @@ function renderSummary(setting, period){
       // After swap: original is off this day (if was working) → +1 off
       if(origWasWorking){
         offAdjustments[orig].swapNetWorkDelta -= 1; // -1 work = +1 off
-        if(grp && offAdjByGroup[grp]) offAdjByGroup[grp].swapNetWorkDelta -= 1;
+        if(grp && offAdjByGroup[grp]){
+          offAdjByGroup[grp].swapNetWorkDelta -= 1;
+          if(!offDetailsByGroup[grp]) offDetailsByGroup[grp] = [];
+          offDetailsByGroup[grp].push({
+            date: s.date,
+            shift: s.shift,
+            originalName: orig,
+            reason: '換班 (本日換出)',
+            mode: 'swap',
+            coverName: '',
+            isSwapDelta: true
+          });
+        }
         // For each swap target, if NOT already working that day → +1 work day for them
         (s.swapWith || []).forEach(name=>{
           if(!offAdjustments[name]) return; // not in this position
@@ -4949,7 +5030,19 @@ function renderSummary(setting, period){
           if(!tgtWasWorking){
             offAdjustments[name].swapNetWorkDelta += 1; // -1 off
             const tgtGrp = groupOfNameOnDate(name, s.date);
-            if(tgtGrp && offAdjByGroup[tgtGrp]) offAdjByGroup[tgtGrp].swapNetWorkDelta += 1;
+            if(tgtGrp && offAdjByGroup[tgtGrp]){
+              offAdjByGroup[tgtGrp].swapNetWorkDelta += 1;
+              if(!offDetailsByGroup[tgtGrp]) offDetailsByGroup[tgtGrp] = [];
+              offDetailsByGroup[tgtGrp].push({
+                date: s.date,
+                shift: s.shift,
+                originalName: name,
+                reason: '換班 (本日換入)',
+                mode: 'swap',
+                coverName: '',
+                isSwapDelta: true
+              });
+            }
           }
         });
       }
@@ -4962,6 +5055,9 @@ function renderSummary(setting, period){
   // We compute base off (raw) and warn only if swap caused IMBALANCE (i.e., total work-day delta ≠ 0
   // across all employees in this position — that means net hours changed).
   let totalWorkDelta = 0;
+
+  // 暫存供字卡 -X 徽章 onclick 取用 (showOffDetails)
+  State._offDetailsByGroup = offDetailsByGroup;
 
   orderedGroups.forEach(g=>{
     // 字卡標題顯示「期末日」當下該組的有效員工 (若期間內換人,顯示最新者)
@@ -5003,7 +5099,8 @@ function renderSummary(setting, period){
     if(emp.name){
       if(adj.leaveDays > 0){
         // 假別/支援 → 上班日減少 "27 -N 天"
-        daysHtml = `<span class="days">${baseWork}</span><span class="leave-add">−${adj.leaveDays}</span>`;
+        // 加 onclick — 點擊查看該組所有相關明細(僅 admin/manager 才有 cursor:pointer 樣式)
+        daysHtml = `<span class="days">${baseWork}</span><span class="leave-add" onclick="showOffDetails('${g}', 'leave', event)" title="點擊查看明細">−${adj.leaveDays}</span>`;
       } else {
         daysHtml = `<span class="days">${baseWork}</span>`;
       }
@@ -8311,20 +8408,33 @@ async function downloadA4(){
 
   const printArea = $('printArea');
   // 字卡顯示規則:上班日 (出勤格數)
+  // 計算字卡總數(員工 + 排班起始 1 張) — 根據總數調整字卡尺寸
+  const empCount = setting.employees.filter(e=>e.name).length;
+  const totalCards = empCount + 1;   // +1 = 排班起始 card
+  // A4 寬約 722px (扣 padding),依字卡數動態決定:
+  //   ≤5 張 → 每張 min-width 較寬 (140px)
+  //   6-7 張 → 縮為 110px (保證一排)
+  //   ≥8 張 → 縮為 90px,字體再縮一些
+  const a4CardCompact = totalCards >= 8;
+  const a4CardMinW = totalCards >= 8 ? 80 : (totalCards >= 6 ? 105 : 140);
+  const a4NameSize = a4CardCompact ? 13 : 16;
+  const a4DaysSize = a4CardCompact ? 22 : 28;
+  const a4CardPadding = a4CardCompact ? '10px 12px' : '14px 16px';
+
   const summaryCardsHtml = setting.employees.filter(e=>e.name).map(e=>{
     const adj = adjustments[e.name] || {leaveDays:0, swapNetWorkDelta:0};
     const work = baseWork[e.name] || 0;
     const adjHtml = (adj.leaveDays > 0)
-      ? `<span style="background:#fde6e6; color:#a83838; font-size:13px; font-weight:700; padding:2px 7px; border-radius:5px; margin-left:6px;">−${adj.leaveDays}</span>`
+      ? `<span style="background:#fde6e6; color:#a83838; font-size:${a4CardCompact?11:13}px; font-weight:700; padding:2px 6px; border-radius:5px; margin-left:4px;">−${adj.leaveDays}</span>`
       : '';
     return `
-      <div style="flex:1; min-width:140px; background:var(--${e.group}-bg); padding:14px 16px; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
-        <div style="font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">${e.group} 上班日</div>
-        <div style="display:flex; align-items:baseline; gap:6px;">
-          <span style="font-family:'Noto Serif TC',serif; font-size:16px; font-weight:600; color:var(--teal-900);">${e.name}</span>
-          <span style="font-family:'Noto Sans TC',sans-serif; font-size:28px; font-weight:700; color:var(--${e.group}-fg);">${work}</span>
+      <div style="flex:1; min-width:${a4CardMinW}px; background:var(--${e.group}-bg); padding:${a4CardPadding}; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
+        <div style="font-size:${a4CardCompact?10:11}px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">${e.group} 上班日</div>
+        <div style="display:flex; align-items:baseline; gap:5px; flex-wrap:wrap;">
+          <span style="font-family:'Noto Serif TC',serif; font-size:${a4NameSize}px; font-weight:600; color:var(--teal-900);">${e.name}</span>
+          <span style="font-family:'Noto Sans TC',sans-serif; font-size:${a4DaysSize}px; font-weight:700; color:var(--${e.group}-fg);">${work}</span>
           ${adjHtml}
-          <span style="font-size:12px; color:var(--muted);">天</span>
+          <span style="font-size:${a4CardCompact?10:12}px; color:var(--muted);">天</span>
         </div>
       </div>
     `;
@@ -8354,12 +8464,12 @@ async function downloadA4(){
     </div>
 
     <!-- Employee summary cards -->
-    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">
+    <div style="display:flex; gap:8px; flex-wrap:nowrap; margin-bottom:18px;">
       ${summaryCardsHtml}
-      <div style="flex:1; min-width:140px; background:var(--teal-50); padding:14px 16px; border-radius:12px;">
-        <div style="font-size:11px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">排班起始</div>
-        <div style="font-family:'Noto Sans TC',sans-serif; font-size:22px; font-weight:700; color:var(--teal-800); line-height:1.1;">${tw(startD.getFullYear())}/${startD.getMonth()+1}/${startD.getDate()}</div>
-        <div style="font-size:10px; color:var(--muted); margin-top:2px; letter-spacing:2px;">VARIANT START · 8 WEEKS</div>
+      <div style="flex:1; min-width:${a4CardMinW}px; background:var(--teal-50); padding:${a4CardPadding}; border-radius:12px;">
+        <div style="font-size:${a4CardCompact?10:11}px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">排班起始</div>
+        <div style="font-family:'Noto Sans TC',sans-serif; font-size:${a4DaysSize-6}px; font-weight:700; color:var(--teal-800); line-height:1.1;">${tw(startD.getFullYear())}/${startD.getMonth()+1}/${startD.getDate()}</div>
+        <div style="font-size:${a4CardCompact?9:10}px; color:var(--muted); margin-top:2px; letter-spacing:1px;">8 WEEKS</div>
       </div>
     </div>
 
