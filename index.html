@@ -652,6 +652,8 @@
     border-collapse:separate;
     border-spacing:0;
     font-size:17px;
+    /* fixed layout — 讓 7 個日期欄位平均分配寬度,代班姓名再長也不撐寬 */
+    table-layout:fixed;
   }
   table.schedule thead th{
     font-family:"Noto Serif TC", serif;
@@ -722,6 +724,18 @@
     cursor:pointer;
     transition:all .15s ease;
     min-width:70px;
+    /* fixed layout 下,pill 不可超出 cell 寬度,代班姓名+院區+備註過長時自動換行 */
+    max-width:100%;
+    box-sizing:border-box;
+    word-break:break-word;
+    line-height:1.3;
+  }
+  /* RWD:窄畫面下縮小 pill 的 min-width (避免 fixed layout 撐爆) */
+  @media (max-width:1100px){
+    .name-pill{ min-width:50px; padding:5px 8px; font-size:16px; }
+  }
+  @media (max-width:720px){
+    .name-pill{ min-width:0; padding:4px 6px; font-size:14px; letter-spacing:0; }
   }
   .name-pill.A{background:var(--A-bg); color:var(--A-fg);}
   .name-pill.B{background:var(--B-bg); color:var(--B-fg);}
