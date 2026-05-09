@@ -6831,15 +6831,40 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
   // ─── Step 5: 早/晚同人檢核 (僅限 櫃台/護理師/藥助) ────────────────
   // 同一天的「早」與「晚」不可為同一人 (出勤 12HR 不在此限)
   if(['櫃台','護理師','藥助'].includes(position) && targetDate){
+    // 重要:cell 的「實際員工」要套用既有 swap (因為 sheet 中的原排班可能已被先前的換班蓋過)
+    // 例:5/11 晚 sheet 中是「麗巧」,但被一筆 swap 換成「寶怡」,
+    //   寶怡點 5/11 晚 cell 時看到自己的名字 → 申請與 5/15 晚換 →
+    //   舊版 Step 5 用 sheet 原始 cell (麗巧) 找寶怡 → 找不到 → 跳過 mutation → 漏判衝突
+    // 現在改成:先計算「套用既有 swap 後的有效 cell」再做 mutation 檢核
+    const computeEffectiveCell = (ds) => {
+      const raw = sched.shifts[ds] ? JSON.parse(JSON.stringify(sched.shifts[ds])) : {};
+      const SHIFT_KEYS = ['morning','noon','evening','attendance'];
+      // 套用既有的 mode='swap' 紀錄 (排除目前正在驗證的這筆,因為它還沒成立)
+      const swapsOnDay = (State.swaps || []).filter(s =>
+        s.branch === branch && s.position === position &&
+        s.date === ds && s.mode === 'swap' && !isPendingApplication(s)
+      );
+      swapsOnDay.forEach(s => {
+        const orig = s.originalName;
+        const newName = (s.swapWith || [])[0];
+        if(!orig || !newName) return;
+        SHIFT_KEYS.forEach(sk => {
+          if(raw[sk] && raw[sk].includes(orig) && (s.shift === '早' && sk === 'morning' || s.shift === '午' && sk === 'noon' || s.shift === '晚' && sk === 'evening' || s.shift === '出勤' && sk === 'attendance')){
+            raw[sk] = raw[sk].map(n => n === orig ? newName : n);
+          }
+        });
+      });
+      return raw;
+    };
+    const sameDay = (date === targetDate);
+    const sourceCell = computeEffectiveCell(date);
+    const targetCell = sameDay ? sourceCell : computeEffectiveCell(targetDate);
     // Build post-swap day cells for the affected dates
     // applicant gives away its slot at (date, shift)
     // partner gives away its slot at (targetDate, targetShift)
     // 注意:當 date === targetDate (同日早晚互換),兩邊的 mutation 必須套用在同一份 cell 上,
     //      否則會誤判為「早晚同人」(實際上是兩人對調,不是同人)
-    const sameDay = (date === targetDate);
-    const sourceCell = JSON.parse(JSON.stringify(sched.shifts[date] || {}));
-    const targetCell = sameDay ? sourceCell : JSON.parse(JSON.stringify(sched.shifts[targetDate] || {}));
-    // Find applicant's shift on source date
+    // Find applicant's shift on source date (用「套用 swap 後的有效 cell」)
     const SHIFT_KEYS = ['morning','noon','evening','attendance'];
     const removeFrom = (cell, name) => {
       SHIFT_KEYS.forEach(sk=>{
@@ -6849,7 +6874,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     // Step a: source date — remove applicant, add partner (in applicant 原本的 shift)
     let appShiftKey = null;
     SHIFT_KEYS.forEach(sk=>{
-      if((sched.shifts[date] && sched.shifts[date][sk] || []).includes(applicantName)){
+      if((sourceCell[sk] || []).includes(applicantName)){
         appShiftKey = sk;
       }
     });
@@ -6860,7 +6885,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     // Step b: target date — remove partner, add applicant (in partner 原本的 shift)
     let parShiftKey = null;
     SHIFT_KEYS.forEach(sk=>{
-      if((sched.shifts[targetDate] && sched.shifts[targetDate][sk] || []).includes(partnerName)){
+      if((targetCell[sk] || []).includes(partnerName)){
         parShiftKey = sk;
       }
     });
