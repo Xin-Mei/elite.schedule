@@ -5215,113 +5215,88 @@ function renderSummary(setting, period){
     return hit2 ? hit2.group : null;
   };
 
-  swaps.forEach(s=>{
-    const orig = s.originalName;
-    if(!offAdjustments[orig]) return; // employee no longer in this position
-    // 規則:除了「換班」(swap mode) 整體中性外,其他原因 (缺人 / 私事支援 / 各種假別)
-    //      都會讓原員工該日視為休假 → leaveDays +1 → 字卡顯示「37 −1」
-    const grp = groupOfNameOnDate(orig, s.date);
-    if(s.mode === 'support' || s.mode === 'leave'){
-      // 私事支援 (support) 與各種假別 (leave,含缺人) 處理相同:
-      //   - 原員工該日視為休假,休假日 +1 天
-      //   - 代班人 (coverName) 可能不在本院區員工名單中,故不計入本院區任何人的工時
-      offAdjustments[orig].leaveDays += 1;
-      if(grp && offAdjByGroup[grp]){
-        offAdjByGroup[grp].leaveDays += 1;
-        // 收集明細(供字卡點擊查看)
-        if(!offDetailsByGroup[grp]) offDetailsByGroup[grp] = [];
-        offDetailsByGroup[grp].push({
-          date: s.date,
-          shift: s.shift,
-          originalName: orig,
-          reason: s.reason || (s.mode === 'support' ? '私事支援' : '請假'),
-          mode: s.mode,
-          coverName: s.coverName || ''
-        });
+  // ─── swap 工時計算 — 全域算法 ──────────────────────────────────────
+  // 舊版逐筆計算 +1/-1 在多筆 chain 場景會誤判,改為「最終 effCell vs base」直接比較。
+  // 演算法:
+  //   1. 對每天,把 sheet 原始 cell 套用該日所有 swap (依 createdAt 排序),得「effCell」
+  //   2. 比較該員工在該日的「base 出勤次數」vs「effCell 出勤次數」 → 算出該員工該日 delta
+  //   3. 累積每員工跨整個 8 週區間的 net delta → swapNetWorkDelta
+  // 此法不論 swap 順序如何都得到一致結果,且不會被 chain swap 誤算。
+  const swapsByDate = {};
+  swaps.filter(s => s.mode === 'swap').forEach(s => {
+    if(!swapsByDate[s.date]) swapsByDate[s.date] = [];
+    swapsByDate[s.date].push(s);
+  });
+  // 同日 swap 依 createdAt 排序 (older first) 才能正確 chain 套用
+  Object.keys(swapsByDate).forEach(d => {
+    swapsByDate[d].sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+  });
+  const SHIFT_KEYS_GLOB = ['morning','noon','evening','attendance'];
+  const SHIFT_LABEL_TO_KEY_GLOB = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  // 對每天,計算 effCell 並累積每員工的 delta
+  Object.keys(swapsByDate).forEach(ds => {
+    const rawCell = (sched.shifts || {})[ds] || {};
+    const effCell = JSON.parse(JSON.stringify(rawCell));
+    // 同日 swap 依序套用
+    swapsByDate[ds].forEach(s => {
+      const sk = SHIFT_LABEL_TO_KEY_GLOB[s.shift];
+      const oOrig = s.originalName;
+      const oNew = (s.swapWith || [])[0];
+      if(!sk || !oOrig || !oNew) return;
+      if(effCell[sk] && effCell[sk].includes(oOrig)){
+        effCell[sk] = effCell[sk].map(n => n === oOrig ? oNew : n);
       }
-    } else if(s.mode === 'swap'){
-      // 特殊情境:**同日早晚互換** (A 的早班 ↔ 畇筑的晚班,且都在同一天)
-      // → 兩人當天上班數仍各為 1,工時整體中性,**不顯示警示**(維持 1 換 1 規則)
-      // 偵測方式:在 swaps 中找有沒有「成對的另一筆」— 同日、方向相反、createdAt 接近
-      const partnerName = (s.swapWith || [])[0];
-      const pairedSameDay = partnerName && swaps.find(o =>
-        o !== s &&
-        o.mode === 'swap' &&
-        o.date === s.date &&             // 同日
-        o.originalName === partnerName && // 對方
-        Array.isArray(o.swapWith) && o.swapWith[0] === orig &&  // 方向相反
-        Math.abs(new Date(o.createdAt) - new Date(s.createdAt)) < 5000  // 同批次
-      );
-      if(pairedSameDay){
-        // 同日早晚互換 — 不調整 swapNetWorkDelta (兩筆紀錄都會走到此分支,都不動 delta)
-        return;
-      }
-      // 一般跨日換班:套用原有邏輯 — 視原排班與目標日期實際情況計算
-      // 注意:cell 中員工要看「該筆 swap 之前已套用其他 swap 後的狀態」(effective cell)
-      //      因為連續多筆單向 swap 時,sheet 原始 cell 中可能仍存著舊員工,
-      //      用 sheet 原始 cell 會讓 tgtWasWorking 判斷錯誤 → 漏掉 +1 → 總 delta 累積為負
-      // 算「該筆 swap 之前」(以 createdAt 為序) 已套用所有其他 swap 的 effective cell
-      const rawCell = (sched.shifts||{})[s.date] || {};
-      const effCell = JSON.parse(JSON.stringify(rawCell));
-      const SHIFT_KEYS_LOCAL = ['morning','noon','evening','attendance'];
-      const SHIFT_LABEL_TO_KEY = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
-      // 套用所有「在這筆 swap 之前發生」的同日 swap (排除自己)
-      swaps.forEach(other => {
-        if(other === s) return;
-        if(other.mode !== 'swap') return;
-        if(other.date !== s.date) return;
-        // 用 createdAt 比較順序,older 優先
-        if(new Date(other.createdAt) >= new Date(s.createdAt)) return;
-        const oOrig = other.originalName;
-        const oNew = (other.swapWith || [])[0];
-        if(!oOrig || !oNew) return;
-        const oSk = SHIFT_LABEL_TO_KEY[other.shift];
-        if(!oSk) return;
-        // 把該班的 oOrig 換成 oNew (若存在)
-        if(effCell[oSk] && effCell[oSk].includes(oOrig)){
-          effCell[oSk] = effCell[oSk].map(n => n === oOrig ? oNew : n);
-        }
-      });
-      const origWasWorking = SHIFT_KEYS_LOCAL.some(sk => (effCell[sk]||[]).includes(orig));
-      // After swap: original is off this day (if was working) → +1 off
-      if(origWasWorking){
-        offAdjustments[orig].swapNetWorkDelta -= 1; // -1 work = +1 off
-        if(grp && offAdjByGroup[grp]){
-          offAdjByGroup[grp].swapNetWorkDelta -= 1;
-          if(!offDetailsByGroup[grp]) offDetailsByGroup[grp] = [];
-          offDetailsByGroup[grp].push({
-            date: s.date,
-            shift: s.shift,
-            originalName: orig,
-            reason: '換班 (本日換出)',
+    });
+    // 計算每員工在 raw 與 eff 中各自出現幾次 — 差值 = 該日 delta
+    const countIn = (cell, name) => SHIFT_KEYS_GLOB.reduce((acc, sk) =>
+      acc + (cell[sk]||[]).filter(n => n === name).length, 0);
+    setting.employees.forEach(e => {
+      if(!e.name) return;
+      const baseCount = countIn(rawCell, e.name);
+      const effCount = countIn(effCell, e.name);
+      const delta = effCount - baseCount;
+      if(delta !== 0){
+        offAdjustments[e.name].swapNetWorkDelta += delta;
+        const grpForEmp = groupOfNameOnDate(e.name, ds);
+        if(grpForEmp && offAdjByGroup[grpForEmp]){
+          offAdjByGroup[grpForEmp].swapNetWorkDelta += delta;
+          if(!offDetailsByGroup[grpForEmp]) offDetailsByGroup[grpForEmp] = [];
+          offDetailsByGroup[grpForEmp].push({
+            date: ds,
+            shift: '',  // 全日聚合,不指定特定班別
+            originalName: e.name,
+            reason: delta > 0 ? '換班 (本日換入)' : '換班 (本日換出)',
             mode: 'swap',
             coverName: '',
             isSwapDelta: true
           });
         }
-        // For each swap target, if NOT already working that day → +1 work day for them
-        (s.swapWith || []).forEach(name=>{
-          if(!offAdjustments[name]) return; // not in this position
-          const tgtWasWorking = SHIFT_KEYS_LOCAL.some(sk => (effCell[sk]||[]).includes(name));
-          if(!tgtWasWorking){
-            offAdjustments[name].swapNetWorkDelta += 1; // -1 off
-            const tgtGrp = groupOfNameOnDate(name, s.date);
-            if(tgtGrp && offAdjByGroup[tgtGrp]){
-              offAdjByGroup[tgtGrp].swapNetWorkDelta += 1;
-              if(!offDetailsByGroup[tgtGrp]) offDetailsByGroup[tgtGrp] = [];
-              offDetailsByGroup[tgtGrp].push({
-                date: s.date,
-                shift: s.shift,
-                originalName: name,
-                reason: '換班 (本日換入)',
-                mode: 'swap',
-                coverName: '',
-                isSwapDelta: true
-              });
-            }
-          }
-        });
       }
+    });
+  });
+
+  swaps.forEach(s=>{
+    const orig = s.originalName;
+    if(!offAdjustments[orig]) return; // employee no longer in this position
+    // swap mode 已在上方全域算法處理,這裡只處理 leave / support
+    if(s.mode !== 'support' && s.mode !== 'leave') return;
+    const grp = groupOfNameOnDate(orig, s.date);
+    // 私事支援 (support) 與各種假別 (leave,含缺人) 處理相同:
+    //   - 原員工該日視為休假,休假日 +1 天
+    //   - 代班人 (coverName) 可能不在本院區員工名單中,故不計入本院區任何人的工時
+    offAdjustments[orig].leaveDays += 1;
+    if(grp && offAdjByGroup[grp]){
+      offAdjByGroup[grp].leaveDays += 1;
+      // 收集明細(供字卡點擊查看)
+      if(!offDetailsByGroup[grp]) offDetailsByGroup[grp] = [];
+      offDetailsByGroup[grp].push({
+        date: s.date,
+        shift: s.shift,
+        originalName: orig,
+        reason: s.reason || (s.mode === 'support' ? '私事支援' : '請假'),
+        mode: s.mode,
+        coverName: s.coverName || ''
+      });
     }
   });
 
