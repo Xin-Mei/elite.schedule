@@ -3044,7 +3044,11 @@
 
 <!-- ========== Alert Modal (檢核錯誤等強調訊息,自動關閉) ========== -->
 <div class="modal-back" id="alertModal" style="z-index:200;">
-  <div class="modal" style="max-width:480px; border:2px solid #c14a4a; box-shadow: 0 20px 60px rgba(168,56,56,0.25);">
+  <div class="modal" style="max-width:480px; border:2px solid #c14a4a; box-shadow: 0 20px 60px rgba(168,56,56,0.25); position:relative;">
+    <button id="alertModalCloseBtn" type="button"
+            onclick="closeAlertModal()"
+            style="display:none; position:absolute; top:10px; right:14px; background:transparent; border:0; font-size:28px; line-height:1; color:#a83838; cursor:pointer; padding:4px 10px; border-radius:6px;"
+            title="關閉">×</button>
     <div class="modal-body" style="padding:32px 28px; text-align:center;">
       <div id="alertModalIcon" style="font-size:54px; margin-bottom:12px;">⚠️</div>
       <h3 id="alertModalTitle" style="margin:0 0 14px; font-family:'Noto Serif TC',serif; color:#a83838; letter-spacing:2px; font-size:22px;">檢核未通過</h3>
@@ -3054,6 +3058,11 @@
       <div id="alertModalCountdown" style="margin-top:18px; font-size:12px; color:var(--muted); letter-spacing:2px;">
         3 秒後自動關閉
       </div>
+      <button id="alertModalManualCloseBtn" type="button"
+              onclick="closeAlertModal()"
+              style="display:none; margin-top:18px; background:var(--teal-700); color:#fff; border:0; padding:8px 24px; border-radius:8px; cursor:pointer; font-family:inherit; font-size:14px; letter-spacing:2px;">
+        關　閉
+      </button>
     </div>
   </div>
 </div>
@@ -3445,21 +3454,53 @@ function toast(msg, type='', duration=2500){
   setTimeout(()=>el.remove(), duration + 400);
 }
 
-// Modal-style alert for important messages (auto-closes after 3 seconds)
+// Modal-style alert for important messages
+//   預設:3 秒自動關閉(短訊息用)
+//   opts.manual=true:不自動關閉,顯示「× / 關閉」按鈕,使用者手動關閉(查看明細用)
 let _alertModalTimer = null;
 function showAlertModal(msg, opts){
   opts = opts || {};
   $('alertModalIcon').textContent = opts.icon || '⚠️';
   $('alertModalTitle').textContent = opts.title || '檢核未通過';
   $('alertModalMsg').innerHTML = msg;
-  const dur = opts.duration || 3000;
-  $('alertModalCountdown').textContent = `${Math.round(dur/1000)} 秒後自動關閉`;
-  openModal('alertModal');
-  if(_alertModalTimer) clearTimeout(_alertModalTimer);
-  _alertModalTimer = setTimeout(()=>{
-    closeModal('alertModal');
+  // 標題顏色:title 是中性的(查看明細)就用 teal,否則維持紅色(警示)
+  const titleEl = $('alertModalTitle');
+  if(titleEl){
+    titleEl.style.color = opts.manual ? 'var(--teal-800)' : '#a83838';
+  }
+
+  // 取消任何之前的 timer
+  if(_alertModalTimer){
+    clearTimeout(_alertModalTimer);
     _alertModalTimer = null;
-  }, dur);
+  }
+
+  if(opts.manual){
+    // 手動關閉模式:不顯示倒數、顯示 × 按鈕與底部關閉按鈕
+    $('alertModalCountdown').style.display = 'none';
+    $('alertModalCloseBtn').style.display = '';
+    $('alertModalManualCloseBtn').style.display = '';
+    openModal('alertModal');
+  } else {
+    // 自動關閉模式:倒數計時 + 自動關閉
+    const dur = opts.duration || 3000;
+    $('alertModalCountdown').textContent = `${Math.round(dur/1000)} 秒後自動關閉`;
+    $('alertModalCountdown').style.display = '';
+    $('alertModalCloseBtn').style.display = 'none';
+    $('alertModalManualCloseBtn').style.display = 'none';
+    openModal('alertModal');
+    _alertModalTimer = setTimeout(()=>{
+      closeAlertModal();
+    }, dur);
+  }
+}
+
+function closeAlertModal(){
+  if(_alertModalTimer){
+    clearTimeout(_alertModalTimer);
+    _alertModalTimer = null;
+  }
+  closeModal('alertModal');
 }
 
 // 點字卡 -N 徽章 → 顯示該組的明細 (按原因分類聚合,例:私事支援 1 天、缺人 15 天)
@@ -3506,7 +3547,7 @@ function showOffDetails(group, kind, evt){
   showAlertModal(html, {
     icon: '📋',
     title: `${group} 組 假別/支援 明細`,
-    duration: 8000
+    manual: true   // 手動關閉(供使用者慢慢查閱)
   });
 }
 
