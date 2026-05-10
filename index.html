@@ -5613,28 +5613,50 @@ function renderScheduleTable(setting, period){
         const ds = fmt(dt);
         let cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
         // ─── 區間 fallback ───────────────────────────────────────
-        // 若 cell 中的員工當日不是該組的有效員工 (例如瑜軒 from=5/16,但 sheet 中 5/11 被寫了瑜軒),
-        // 顯示為「該組當日有效員工」或「組別字母」,避免使用者看到不該出現的人
+        // ─── 區間 fallback / orphan 修正 ─────────────────────────
+        // 若 cell 中的姓名不在當前 employees 名單 (歷史殘留),
+        // 用「現場計算」(依循環+startIndex) 算出該 cell 該班別應該是誰,取代 orphan。
+        // 有效員工 (在名單中) 保留不動。
         if(cell.length){
           const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
           const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
+          // 預先算「現場計算」結果 (僅當有 orphan 時才用,避免每格都算)
+          let _computedForFallback = null;
+          const _getComputed = () => {
+            if(_computedForFallback === null){
+              _computedForFallback = computeShiftCell(ds);
+            }
+            return _computedForFallback;
+          };
           cell = cell.map(n => {
             if(!n) return n;
-            if(validNames.has(n)) return n;
-            // n 不是當日有效員工 → 嘗試找他原本屬於哪組
-            // 1. 完全比對 employees (name)
-            let empRec = setting.employees.find(e => e.name === n);
-            // 2. 若失敗 → 嘗試前綴/後綴 fuzzy match
-            if(!empRec){
-              empRec = setting.employees.find(e =>
-                e.name && (e.name.startsWith(n) || n.startsWith(e.name))
-              );
+            if(validNames.has(n)) return n;          // 在名單 → 保留
+            if(n === 'A' || n === 'B' || n === 'C' || n === 'D') {
+              // 純組別字母 (如「D」) → 用現場計算該組當日員工取代
+              const computed = _getComputed();
+              const computedNames = computed[sr.key] || [];
+              // 看現場計算 cell 中哪個是該組的人
+              const altEff = dayEffEmps.find(e => e.group === n);
+              if(altEff && computedNames.includes(altEff.name)) return altEff.name;
+              return null;   // 該組沒人,顯示空
             }
-            if(!empRec) return n;
-            const grp = empRec.group;
-            const altEff = dayEffEmps.find(e => e.group === grp);
-            return altEff ? altEff.name : grp;
-          });
+            // 其他情況 (例如「陳」歷史殘留):
+            //   現場計算該班別應該是誰 (任何在名單的人) → 取代
+            const computed = _getComputed();
+            const computedNames = computed[sr.key] || [];
+            if(computedNames.length === 1){
+              // 該班別單人 → 直接用該人取代
+              return computedNames[0];
+            } else if(computedNames.length > 1){
+              // 多人 → 試圖找跟 orphan 相關的 (前綴/後綴 match)
+              const matched = computedNames.find(cn =>
+                cn === n || cn.startsWith(n) || n.startsWith(cn)
+              );
+              if(matched) return matched;
+              return computedNames[0];
+            }
+            return null;   // 現場計算該班沒人,顯示空
+          }).filter(n => n !== null);   // 移除被替換為 null 的 entry
         }
         html += `<td>${renderCell(cell, ds, sr.label, groupOfFor(ds), swapMap)}</td>`;
       }
