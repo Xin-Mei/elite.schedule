@@ -5237,7 +5237,7 @@ function renderSummary(setting, period){
   const SHIFT_KEYS_GLOB = ['morning','noon','evening','attendance'];
   const SHIFT_LABEL_TO_KEY_GLOB = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
   // ─── 現場計算 cell helper (用於 swap 工時計算) ──────────────────
-  // 跟排班表渲染一樣,工時計算也用「現場計算」當基底,確保跟畫面一致
+  // 跟排班表渲染一樣,工時計算也用「混合策略」 — sheet 可信時用 sheet,否則用現場計算
   const _swapIsPartTime = (State.currentPosition === '工讀');
   const _swapAbsPeriodIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
   const _swapPeriodOffset = (_swapAbsPeriodIdx >= 0 ? _swapAbsPeriodIdx : 0) * 56;
@@ -5247,19 +5247,44 @@ function renderSummary(setting, period){
   const _swapEve  = setting.rules.eveningCount || 0;
   const _swapAtt  = setting.rules.attendanceCount || 0;
   const _swapPeriodStartD = parseDate(period.startDate);
+  const _swapAllValidNames = new Set(
+    (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
+  );
   const _swapComputeCell = (ds) => {
     if(_swapIsPartTime){
-      // 工讀仍讀 sheet
       return (sched.shifts || {})[ds] || {};
     }
+    // 檢查 sheet cell 中所有姓名是否都在當前 employees 名單
+    const sheetCell = (sched.shifts || {})[ds] || {};
+    const allShiftNames = [
+      ...(sheetCell.morning||[]),
+      ...(sheetCell.noon||[]),
+      ...(sheetCell.evening||[]),
+      ...(sheetCell.attendance||[])
+    ];
+    const sheetAllInRoster = allShiftNames.length > 0 && allShiftNames.every(n => _swapAllValidNames.has(n));
+    if(sheetAllInRoster){
+      // sheet 可信 → 直接回 sheet 內容
+      return sheetCell;
+    }
+    // sheet 為空 或 有歷史殘留 → 現場計算
     const result = {morning:[], noon:[], evening:[], attendance:[]};
     if(!_swapPattern.length) return result;
     const dt = parseDate(ds);
     const dayDiff = Math.floor((dt - _swapPeriodStartD) / 86400000);
     if(dayDiff < 0 || dayDiff >= 56) return result;
     const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-    dayEffEmps.forEach(emp => {
-      if(!emp.name || !emp.group) return;
+    const _seen = new Set();
+    const _uniq = [];
+    for(let i = dayEffEmps.length - 1; i >= 0; i--){
+      const emp = dayEffEmps[i];
+      if(!emp || !emp.group || !emp.name) continue;
+      if(emp.name === emp.group) continue;
+      if(_seen.has(emp.group)) continue;
+      _seen.add(emp.group);
+      _uniq.unshift(emp);
+    }
+    _uniq.forEach(emp => {
       const cycPos = ((emp.startIndex - 1) + _swapPeriodOffset + dayDiff) % _swapPattern.length;
       const sym = _swapPattern[cycPos];
       if(sym === '早'){
@@ -5365,35 +5390,55 @@ function renderSummary(setting, period){
                 || setting.employees.find(e=>e.group===g)
                 || {group:g, name:''};
     // 計算 baseWork:每天用「該日有效的此組員工」計入,支援區間切換
-    // 改為「現場計算」 — 不再讀 sheet cell 中的姓名,而是用 cyclePattern + startIndex
-    // 推算當日該組是否上班 (與排班表渲染邏輯一致)
+    // 混合策略 (跟畫面渲染一致):
+    //   • sheet cell 中所有姓名都在名單 → 看該員工是否在 sheet → 計入
+    //   • 否則 → 用現場計算 (跑循環) 判斷該員工該日是否上班
     let baseWork = 0;
     const _isPartTime = (State.currentPosition === '工讀');
     const _absPeriodIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
     const _periodOffset = (_absPeriodIdx >= 0 ? _absPeriodIdx : 0) * totalDays;
     const _pattern = setting.rules.cyclePattern || [];
+    // 預先建立當前 employees 的有效姓名 set
+    const _allValidNames = new Set(
+      (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
+    );
     for(let i=0;i<totalDays;i++){
       const ds = fmt(addDays(startD,i));
-      // 找該日該組的有效員工
       const dayEmps = getEffectiveEmployees(setting.employees, ds);
       const dayEmp = dayEmps.find(e => e.group === g);
       if(!dayEmp || !dayEmp.name) continue;
       const n = dayEmp.name;
+      const cell = (sched.shifts || {})[ds];
       if(_isPartTime){
-        // 工讀:仍讀 sheet (沒有循環)
-        const cell = (sched.shifts||{})[ds];
         if(!cell) continue;
         if((cell.morning||[]).includes(n)) baseWork++;
         if((cell.noon||[]).includes(n)) baseWork++;
         if((cell.evening||[]).includes(n)) baseWork++;
         if((cell.attendance||[]).includes(n)) baseWork++;
       } else {
-        // 一般職位:用循環現場算 — 該員工今天該上的班別
-        if(!_pattern.length) continue;
-        const cycPos = ((dayEmp.startIndex - 1) + _periodOffset + i) % _pattern.length;
-        const sym = _pattern[cycPos];
-        if(sym === '早' || sym === '午' || sym === '晚' || sym === '出勤'){
-          baseWork++;   // 每個上班符號 = 1 個上班日
+        // 一般職位:檢查 sheet cell 中所有人是否都在名單
+        const allShiftNames = cell ? [
+          ...(cell.morning||[]),
+          ...(cell.noon||[]),
+          ...(cell.evening||[]),
+          ...(cell.attendance||[])
+        ] : [];
+        const sheetAllInRoster = allShiftNames.length > 0 && allShiftNames.every(nm => _allValidNames.has(nm));
+        if(sheetAllInRoster && cell){
+          // sheet 可信 → 看該員工是否在 sheet
+          if((cell.morning||[]).includes(n)) baseWork++;
+          if((cell.noon||[]).includes(n)) baseWork++;
+          if((cell.evening||[]).includes(n)) baseWork++;
+          if((cell.attendance||[]).includes(n)) baseWork++;
+        } else {
+          // sheet 為空 或 有歷史殘留 → 用現場計算
+          if(!_pattern.length) continue;
+          if(dayEmp.name === dayEmp.group) continue;
+          const cycPos = ((dayEmp.startIndex - 1) + _periodOffset + i) % _pattern.length;
+          const sym = _pattern[cycPos];
+          if(sym === '早' || sym === '午' || sym === '晚' || sym === '出勤'){
+            baseWork++;
+          }
         }
       }
     }
@@ -5578,9 +5623,21 @@ function renderScheduleTable(setting, period){
     if(dayDiff < 0 || dayDiff >= 56) return result;   // 區間外
     // 取當日有效員工 (考慮 from/to 區間切割)
     const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-    // 同組可能有多筆員工 (區間切割) → 每組只取一筆 (getEffectiveEmployees 已處理)
-    dayEffEmps.forEach(emp => {
-      if(!emp.name || !emp.group) return;
+    // 強制去重:同組最多 1 人 (避免 from/to 都空時 getEffectiveEmployees 回傳多筆同組)
+    // 多筆時取「最後一筆」(通常設定 UI 上排在後面的是「現任」員工)
+    const seenGroups = new Set();
+    const uniqueByGroup = [];
+    for(let i = dayEffEmps.length - 1; i >= 0; i--){
+      const emp = dayEffEmps[i];
+      if(!emp || !emp.group || !emp.name) continue;
+      if(seenGroups.has(emp.group)) continue;
+      seenGroups.add(emp.group);
+      uniqueByGroup.unshift(emp);
+    }
+    uniqueByGroup.forEach(emp => {
+      // 過濾「name 是純組別字母」的佔位員工 (例如 {name:'A', group:'A'})
+      // 這類員工是舊系統的虛擬員工,不該真的填入 cell — 跳過
+      if(emp.name === emp.group) return;
       const cycPos = ((emp.startIndex - 1) + periodOffset + dayDiff) % pattern.length;
       const sym = pattern[cycPos];
       // 上限保險 (跟 autoGenerate 一致):cell 已滿不再 push
@@ -5654,15 +5711,28 @@ function renderScheduleTable(setting, period){
       for(let d=0; d<7; d++){
         const dt = addDays(startD, w*7+d);
         const ds = fmt(dt);
-        // ─── cell 來源:現場計算 (取代 sheet 中可能殘留的舊員工姓名) ────
-        // 工讀職位無循環 → 仍讀 sheet
-        // 其他職位 → 用 employees + cyclePattern + startIndex 現場算
+        // ─── cell 來源:混合策略 ──────────────────────────────────────
+        // 1. 工讀 → 一律讀 sheet (沒有循環)
+        // 2. 一般職位 →
+        //    a) sheet cell 中「所有姓名都在當前 employees 名單」→ 用 sheet (保留人工排班結果)
+        //    b) 否則 (有任何姓名是歷史殘留) → 整個 cell 用現場計算取代 (修正錯誤資料)
         let cell;
         if(isPartTime){
           cell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
         } else {
-          const computed = computeShiftCell(ds);
-          cell = computed[sr.key] || [];
+          const sheetCell = (sched.shifts[ds] && sched.shifts[ds][sr.key]) || [];
+          // 取當前 employees 名單姓名 set (含所有區間,不分日期)
+          const allValidNames = new Set(
+            (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
+          );
+          const allInRoster = sheetCell.length > 0 && sheetCell.every(n => allValidNames.has(n));
+          if(allInRoster){
+            cell = sheetCell;
+          } else {
+            // sheet 為空 或 有歷史殘留 → 用現場計算
+            const computed = computeShiftCell(ds);
+            cell = computed[sr.key] || [];
+          }
         }
         html += `<td>${renderCell(cell, ds, sr.label, groupOfFor(ds), swapMap)}</td>`;
       }
@@ -6891,8 +6961,13 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     } else if(_validPattern.length){
       // 一般職位:現場計算 — 該日有效員工依各自 startIndex 算當日班別
       const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+      // 強制去重 + 過濾佔位員工
+      const _seen3 = new Set();
       dayEffEmps.forEach(emp => {
-        if(!emp.name) return;
+        if(!emp || !emp.name || !emp.group) return;
+        if(emp.name === emp.group) return;
+        if(_seen3.has(emp.group)) return;
+        _seen3.add(emp.group);
         const cycPos = ((emp.startIndex - 1) + _validPOffset + d) % _validPattern.length;
         const sym = _validPattern[cycPos];
         if(sym === '早' || sym === '午' || sym === '晚' || sym === '出勤'){
@@ -6982,8 +7057,17 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
           const dayDiff = Math.floor((dt - _periodStart) / 86400000);
           if(dayDiff >= 0 && dayDiff < 56){
             const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-            dayEffEmps.forEach(emp => {
-              if(!emp.name || !emp.group) return;
+            const _seen2 = new Set();
+            const _uniq2 = [];
+            for(let i = dayEffEmps.length - 1; i >= 0; i--){
+              const emp = dayEffEmps[i];
+              if(!emp || !emp.group || !emp.name) continue;
+              if(emp.name === emp.group) continue;
+              if(_seen2.has(emp.group)) continue;
+              _seen2.add(emp.group);
+              _uniq2.unshift(emp);
+            }
+            _uniq2.forEach(emp => {
               const cycPos = ((emp.startIndex - 1) + _pOffset + dayDiff) % _patt.length;
               const sym = _patt[cycPos];
               if(sym === '早'){ if(_morn === 0 || raw.morning.length < _morn) raw.morning.push(emp.name); }
