@@ -6324,10 +6324,13 @@ function openSwapModal(date, shift, name){
     // ─── 偵測 combo 群組 ───────────────────────────────────────────
     // 「換班+代班」會建立 3 筆紀錄 (Rec1=swap本班 / Rec2=swap配對 / Rec3=leave代班)
     // 都共用 [CG:時間戳] 標記。若使用者點到任一筆,以 combo 模式還原 — 顯示完整資訊。
-    const isComboGroup = !!getComboGroupId(existing);
+    // 重要:只有「note 有 CG 標記 + 找得到其他 combo 成員」才當 combo,
+    //      避免「孤兒 CG」(其他成員已被刪除,只剩此筆) 誤判為 combo。
+    const _comboMembers = findComboGroupMembers(existing);
+    const isComboGroup = !!getComboGroupId(existing) && _comboMembers.length > 0;
     if(isComboGroup){
       // 找出 combo 三筆紀錄 — 自身 + group members
-      const comboMembers = [existing, ...findComboGroupMembers(existing)];
+      const comboMembers = [existing, ..._comboMembers];
       // Rec1 = 本班 swap (本日本班 originalName=本班員工 mode=swap)
       // Rec2 = 配對 swap (對方那班 originalName=partner mode=swap)
       // Rec3 = 本班代班 (本日本班 originalName=partner mode≠swap)
