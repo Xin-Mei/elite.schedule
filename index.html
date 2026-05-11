@@ -5327,7 +5327,49 @@ function renderSummary(setting, period){
                 || setting.employees.find(e=>e.group===g)
                 || {group:g, name:''};
     // 計算 baseWork:每天用「該日有效的此組員工」計入,支援區間切換
+    // 套用跟畫面渲染相同的 fallback:cell 中不在名單的姓名 (歷史殘留),
+    // 視為該班別現場計算的人。這樣字卡天數會跟畫面看到的人一致。
     let baseWork = 0;
+    const _bwAllValidNames = new Set(
+      (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
+    );
+    // computeShiftCell 在 renderScheduleTable 中定義,這裡需要重新算或共用
+    // 直接 inline 算:依當前 period 找絕對索引,套用 cyclePattern + startIndex
+    const _bwAbsIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+    const _bwPOffset = (_bwAbsIdx >= 0 ? _bwAbsIdx : 0) * totalDays;
+    const _bwPattern = setting.rules.cyclePattern || [];
+    const _bwMorn = setting.rules.morningCount || 0;
+    const _bwNoon = setting.rules.noonCount || 0;
+    const _bwEve  = setting.rules.eveningCount || 0;
+    const _bwAtt  = setting.rules.attendanceCount || 0;
+    // helper:對某天某班別,算現場計算結果 (套用 fallback 用)
+    const _bwComputedCache = {};
+    const _bwGetComputed = (ds, dayDiff) => {
+      if(_bwComputedCache[ds]) return _bwComputedCache[ds];
+      const result = {morning:[], noon:[], evening:[], attendance:[]};
+      if(!_bwPattern.length){ _bwComputedCache[ds] = result; return result; }
+      const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+      const _seen = new Set();
+      const _uniq = [];
+      for(let i = dayEffEmps.length - 1; i >= 0; i--){
+        const emp = dayEffEmps[i];
+        if(!emp || !emp.group || !emp.name) continue;
+        if(emp.name === emp.group) continue;
+        if(_seen.has(emp.group)) continue;
+        _seen.add(emp.group);
+        _uniq.unshift(emp);
+      }
+      _uniq.forEach(emp => {
+        const cycPos = ((emp.startIndex - 1) + _bwPOffset + dayDiff) % _bwPattern.length;
+        const sym = _bwPattern[cycPos];
+        if(sym === '早'){ if(_bwMorn === 0 || result.morning.length < _bwMorn) result.morning.push(emp.name); }
+        else if(sym === '午'){ if(_bwNoon === 0 || result.noon.length < _bwNoon) result.noon.push(emp.name); }
+        else if(sym === '晚'){ if(_bwEve === 0 || result.evening.length < _bwEve) result.evening.push(emp.name); }
+        else if(sym === '出勤'){ if(_bwAtt === 0 || result.attendance.length < _bwAtt) result.attendance.push(emp.name); }
+      });
+      _bwComputedCache[ds] = result;
+      return result;
+    };
     for(let i=0;i<totalDays;i++){
       const ds = fmt(addDays(startD,i));
       const cell = (sched.shifts||{})[ds];
@@ -5337,10 +5379,27 @@ function renderSummary(setting, period){
       const dayEmp = dayEmps.find(e => e.group === g);
       if(!dayEmp || !dayEmp.name) continue;
       const n = dayEmp.name;
-      if((cell.morning||[]).includes(n)) baseWork++;
-      if((cell.noon||[]).includes(n)) baseWork++;
-      if((cell.evening||[]).includes(n)) baseWork++;
-      if((cell.attendance||[]).includes(n)) baseWork++;
+      // 每個班別:檢查 cell 中是否包含該員工 (套用 fallback)
+      ['morning','noon','evening','attendance'].forEach(sk => {
+        const namesInCell = cell[sk] || [];
+        if(!namesInCell.length) return;
+        // 套用同樣的 fallback 邏輯:不在名單的姓名 → 用現場計算結果取代
+        let hitCount = 0;
+        namesInCell.forEach(cn => {
+          if(cn === n){
+            hitCount++;
+            return;
+          }
+          if(_bwAllValidNames.has(cn)) return;   // 在名單但不是本員工 → skip
+          // 不在名單 (orphan) → 用現場計算結果取代
+          const computed = _bwGetComputed(ds, i);
+          const computedForShift = computed[sk] || [];
+          if(computedForShift.includes(n)){
+            hitCount++;
+          }
+        });
+        if(hitCount > 0) baseWork += hitCount;
+      });
     }
     // adj 改讀 group level 累積值 (整組 leaveDays / swapNetWorkDelta),
     // 才能在「期間中換人」時依然正確顯示 (因為 swap 紀錄可能屬於該組的舊員工)
