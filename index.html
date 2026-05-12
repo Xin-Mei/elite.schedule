@@ -5790,7 +5790,11 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
             metaText = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           }
           const metaHtml = metaText ? `<span class="cover-branch">${metaText}</span>` : '';
-          return `${sep}<span class="split-period">${c.period||''}</span>${c.name||''}${metaHtml}`;
+          // 時段標籤:只顯示有意義的 (早/午/晚 — 12HR 拆段情境);
+          // 「第一段/第二段」(一般班別拆兩組代班) 對使用者無新資訊,省略
+          const periodLabel = (c.period === '第一段' || c.period === '第二段') ? '' : (c.period || '');
+          const periodHtml = periodLabel ? `<span class="split-period">${periodLabel}</span>` : '';
+          return `${sep}${periodHtml}${c.name||''}${metaHtml}`;
         }).join('');
         modeClass = (swap.mode === 'support') ? 'mode-support' : 'mode-leave';
       } else if(swap.mode === 'support'){
