@@ -2898,55 +2898,17 @@
         </div>
       </div>
 
-      <!-- Block B: 私事支援 (mode=support) -->
-      <div id="swapBlockSupport">
-        <div class="form-grid form-grid-2">
-          <div class="form-row">
-            <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
-            <select id="swapSupportCoverBranch" onchange="syncSwapSupportCover()">
-              <option value="">— 請選擇 —</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
-            <input type="text" id="swapSupportCoverName" placeholder="如:王小美" oninput="syncSwapSupportCover()"/>
-          </div>
-        </div>
-        <div style="font-size:12px; color:var(--muted); margin-top:-8px; margin-bottom:14px;">
-          可填本院區員工或外院區/院外人員
-        </div>
-      </div>
-
-      <!-- Block C: 缺人/各種假別 (mode=leave) -->
-      <div id="swapBlockLeave">
-        <!-- 「該日為兩段班」開關 — 僅出勤(12HR) 班別才顯示 -->
-        <div id="swapSplitToggleRow" class="form-row" style="display:none; padding:10px 14px; background:#fef3c7; border:1px solid #e8d28a; border-radius:8px; margin-bottom:12px;">
+      <!-- 「該日為兩段班」開關 + 拆段區塊 — leave / support 共用 -->
+      <!-- 由 applySwapModeUI 控制 display:在 leave 或 support 模式時顯示 -->
+      <div id="swapSplitContainer" style="display:none;">
+        <div id="swapSplitToggleRow" class="form-row" style="padding:10px 14px; background:#fef3c7; border:1px solid #e8d28a; border-radius:8px; margin-bottom:12px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
             <input type="checkbox" id="swapSplitToggle" onchange="onSwapSplitToggle()"/>
-            <span>該日為<b>兩段班</b> <span style="font-weight:400; color:var(--muted); font-size:12px;">— 早段、晚段不同代班人員時勾選</span></span>
+            <span>該日為<b>兩段班</b> <span style="font-weight:400; color:var(--muted); font-size:12px;">— 同一 cell 拆兩組代班人員時勾選</span></span>
           </label>
         </div>
 
-        <!-- 一般單一代班 (預設) -->
-        <div id="swapLeaveSingleBlock">
-          <div class="form-grid form-grid-2">
-            <div class="form-row">
-              <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
-              <select id="swapLeaveCoverBranch" onchange="syncSwapLeaveCover()">
-                <option value="">— 請選擇 —</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
-              <input type="text" id="swapLeaveCoverName" placeholder="如:王小美" oninput="syncSwapLeaveCover()"/>
-            </div>
-          </div>
-          <div style="font-size:13px; color:var(--muted); margin-top:-4px;">
-            送出後班表會顯示為紅底,並顯示代班人姓名與院區
-          </div>
-        </div>
-
-        <!-- 兩段班 (僅 attendance + 勾選兩段班時顯示) -->
+        <!-- 兩段班區塊 (勾選後才顯示) -->
         <div id="swapLeaveSplitBlock" style="display:none;">
           <div class="split-segment">
             <div class="split-segment-head">第一段</div>
@@ -3003,7 +2965,48 @@
             </div>
           </div>
           <div style="font-size:13px; color:var(--muted); margin-top:6px;">
-            送出後班表會顯示為紅底,並依序列出兩段代班人員資訊與各自備註
+            送出後班表會依序列出兩段代班人員資訊與各自備註
+          </div>
+        </div>
+      </div>
+
+      <!-- Block B: 私事支援 (mode=support) -->
+      <div id="swapBlockSupport">
+        <div class="form-grid form-grid-2">
+          <div class="form-row">
+            <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+            <select id="swapSupportCoverBranch" onchange="syncSwapSupportCover()">
+              <option value="">— 請選擇 —</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+            <input type="text" id="swapSupportCoverName" placeholder="如:王小美" oninput="syncSwapSupportCover()"/>
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--muted); margin-top:-8px; margin-bottom:14px;">
+          可填本院區員工或外院區/院外人員
+        </div>
+      </div>
+
+      <!-- Block C: 缺人/各種假別 (mode=leave) -->
+      <div id="swapBlockLeave">
+        <!-- 一般單一代班 (預設) -->
+        <div id="swapLeaveSingleBlock">
+          <div class="form-grid form-grid-2">
+            <div class="form-row">
+              <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+              <select id="swapLeaveCoverBranch" onchange="syncSwapLeaveCover()">
+                <option value="">— 請選擇 —</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+              <input type="text" id="swapLeaveCoverName" placeholder="如:王小美" oninput="syncSwapLeaveCover()"/>
+            </div>
+          </div>
+          <div style="font-size:13px; color:var(--muted); margin-top:-4px;">
+            送出後班表會顯示為紅底,並顯示代班人姓名與院區
           </div>
         </div>
       </div>
@@ -6479,16 +6482,47 @@ function openSwapModal(date, shift, name){
     } else {
       $('swapCover').value = existing.coverName || '';
       document.querySelectorAll('.swap-cover-input').forEach(el=>el.value = existing.coverName || '');
-      // For support mode, parse "Name (Branch)" back into the two fields
+      // For support mode, parse "Name (Branch)" back into the two fields (或還原兩段班)
       if(existing.mode === 'support'){
-        const m = String(existing.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
-        if(m){
-          if($('swapSupportCoverName')) $('swapSupportCoverName').value = m[1].trim();
-          if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('swapSupportCoverBranch')){
-            $('swapSupportCoverBranch').value = m[2].trim();
+        if(isSplitSwap(existing)){
+          // 兩段班:還原拆段 UI (跟 leave 共用)
+          ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
+            const sel = $(id);
+            if(sel){
+              sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+                COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+            }
+          });
+          updateSplitPeriodOptions();
+          const splits = existing.swapWith || [];
+          if(splits[0]){
+            $('swapSplitPeriod1').value = splits[0].period || '早';
+            $('swapSplitBranch1').value = splits[0].branch || '';
+            $('swapSplitName1').value   = splits[0].name   || '';
+            $('swapSplitNote1').value   = splits[0].note   || '';
           }
-        } else if($('swapSupportCoverName')){
-          $('swapSupportCoverName').value = existing.coverName || '';
+          if(splits[1]){
+            $('swapSplitPeriod2').value = splits[1].period || '晚';
+            $('swapSplitBranch2').value = splits[1].branch || '';
+            $('swapSplitName2').value   = splits[1].name   || '';
+            $('swapSplitNote2').value   = splits[1].note   || '';
+          }
+          const cb = $('swapSplitToggle');
+          if(cb) cb.checked = true;
+        } else {
+          // 一般單一代班
+          const m = String(existing.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
+          if(m){
+            if($('swapSupportCoverName')) $('swapSupportCoverName').value = m[1].trim();
+            if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('swapSupportCoverBranch')){
+              $('swapSupportCoverBranch').value = m[2].trim();
+            }
+          } else if($('swapSupportCoverName')){
+            $('swapSupportCoverName').value = existing.coverName || '';
+          }
+          // 確保兩段班勾選為 false
+          const cb = $('swapSplitToggle');
+          if(cb) cb.checked = false;
         }
       }
       // For leave mode, parse "Name (Branch)" back into the two fields
@@ -7456,13 +7490,13 @@ function applySwapModeUI(){
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
 
-  // 「該日為兩段班」勾選列 — leave 模式下顯示
+  // 「該日為兩段班」勾選列 — leave / support 模式下都顯示
   // 12HR (出勤班): 早/午/晚 三個時段可選
   // 一般班別 (早/午/晚 三 cell): 該 cell 拆成「第一段 / 第二段」兩組代班人員
-  const splitToggleRow = $('swapSplitToggleRow');
-  if(splitToggleRow){
-    const showSplit = (mode === 'leave');
-    splitToggleRow.style.display = showSplit ? '' : 'none';
+  const splitContainer = $('swapSplitContainer');
+  if(splitContainer){
+    const showSplit = (mode === 'leave' || mode === 'support');
+    splitContainer.style.display = showSplit ? '' : 'none';
     if(!showSplit){
       // 切走時記得清掉勾選 + 還原成單一代班區塊
       const cb = $('swapSplitToggle');
@@ -7505,10 +7539,25 @@ function applySwapModeUI(){
 function onSwapSplitToggle(){
   const cb = $('swapSplitToggle');
   const checked = cb ? cb.checked : false;
-  const single = $('swapLeaveSingleBlock');
+  // 勾選後,leave/support 的單一代班區塊都隱藏,顯示拆段區塊
+  const leaveSingle = $('swapLeaveSingleBlock');
+  const supportBlock = $('swapBlockSupport');
   const splitBlk = $('swapLeaveSplitBlock');
-  if(single)   single.style.display   = checked ? 'none' : '';
-  if(splitBlk) splitBlk.style.display = checked ? '' : 'none';
+  // 取得當前 mode (從 swapReason 推斷)
+  const reason = $('swapReason') ? $('swapReason').value : '';
+  const cfg = SWAP_REASONS.find(r=>r.id===reason);
+  const mode = cfg ? cfg.mode : 'leave';
+  if(checked){
+    // 勾選兩段班 → 兩個單一代班都隱藏
+    if(leaveSingle) leaveSingle.style.display = 'none';
+    if(supportBlock) supportBlock.style.display = 'none';
+    if(splitBlk) splitBlk.style.display = '';
+  } else {
+    // 沒勾選 → 依當前 mode 顯示單一代班
+    if(splitBlk) splitBlk.style.display = 'none';
+    if(leaveSingle) leaveSingle.style.display = (mode === 'leave') ? '' : 'none';
+    if(supportBlock) supportBlock.style.display = (mode === 'support') ? '' : 'none';
+  }
 
   // 兩段班時,底部共用備註欄隱藏 (改用每段內的獨立備註)
   const noteRow = $('swapNoteRow');
@@ -7780,8 +7829,8 @@ async function submitSwap(){
   let swapWith = [];
   let coverName = '';
   let splitNotes = null;  // 兩段班時用,個別段的備註
-  if(mode === 'leave'){
-    // 偵測「該日為兩段班」勾選狀態 (leave 模式都允許,不限 12HR)
+  if(mode === 'leave' || mode === 'support'){
+    // 偵測「該日為兩段班」勾選狀態 (leave / support 都允許)
     const splitToggle = $('swapSplitToggle');
     const isSplit = splitToggle && splitToggle.checked;
     if(isSplit){
@@ -7805,21 +7854,21 @@ async function submitSwap(){
       splitNotes = {note1, note2};
       // coverName 也填入「概覽字串」方便 records 列表 / 舊版相容檢視
       coverName = `${p1}:${n1} (${b1}) / ${p2}:${n2} (${b2})`;
-    } else {
-      // 一般單一代班:必填院區 + 姓名
+    } else if(mode === 'leave'){
+      // 一般單一代班 (leave):必填院區 + 姓名
       const lb = $('swapLeaveCoverBranch').value;
       const ln = $('swapLeaveCoverName').value.trim();
       if(!lb){ toast('請選擇代班人員院區','warn'); return; }
       if(!ln){ toast('請填寫代班人員姓名','warn'); return; }
       coverName = `${ln} (${lb})`;
+    } else {
+      // 私事支援:必填院區 + 姓名
+      const sb = ($('swapSupportCoverBranch') && $('swapSupportCoverBranch').value) || '';
+      const sn = (($('swapSupportCoverName') && $('swapSupportCoverName').value) || '').trim();
+      if(!sb){ toast('請選擇代班人員院區','warn'); return; }
+      if(!sn){ toast('請填寫代班人員姓名','warn'); return; }
+      coverName = `${sn} (${sb})`;
     }
-  } else {
-    // 私事支援:必填院區 + 姓名 (與 leave 一致)
-    const sb = ($('swapSupportCoverBranch') && $('swapSupportCoverBranch').value) || '';
-    const sn = (($('swapSupportCoverName') && $('swapSupportCoverName').value) || '').trim();
-    if(!sb){ toast('請選擇代班人員院區','warn'); return; }
-    if(!sn){ toast('請填寫代班人員姓名','warn'); return; }
-    coverName = `${sn} (${sb})`;
   }
 
   // 兩段班的 rec.note 串接兩段備註(例:"早:DR16 / 晚:DR47"),方便記錄列表預覽;
