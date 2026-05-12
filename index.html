@@ -6503,6 +6503,8 @@ function openSwapModal(date, shift, name){
                 COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
             }
           });
+          // 依當前班別動態設定時段下拉選項 (再賦值才能 match)
+          updateSplitPeriodOptions();
           const splits = existing.swapWith || [];
           if(splits[0]){
             $('swapSplitPeriod1').value = splits[0].period || '早';
@@ -7454,18 +7456,21 @@ function applySwapModeUI(){
   $('swapBlockSupport').style.display  = (mode==='support') ? '' : 'none';
   $('swapBlockLeave').style.display    = (mode==='leave')   ? '' : 'none';
 
-  // 「該日為兩段班」勾選列 — 僅在 leave 模式 + 出勤(12HR) 班別時顯示
-  // (12HR 一格代表整天,可拆早段/晚段不同代班;一般早晚已分開兩 cell,不需勾選)
+  // 「該日為兩段班」勾選列 — leave 模式下顯示
+  // 12HR (出勤班): 早/午/晚 三個時段可選
+  // 一般班別 (早/午/晚 三 cell): 該 cell 拆成「第一段 / 第二段」兩組代班人員
   const splitToggleRow = $('swapSplitToggleRow');
   if(splitToggleRow){
-    const isAttendance = (_swapCtx && _swapCtx.shift === '出勤');
-    const showSplit = (mode === 'leave') && isAttendance;
+    const showSplit = (mode === 'leave');
     splitToggleRow.style.display = showSplit ? '' : 'none';
     if(!showSplit){
       // 切走時記得清掉勾選 + 還原成單一代班區塊
       const cb = $('swapSplitToggle');
       if(cb) cb.checked = false;
       onSwapSplitToggle();
+    } else {
+      // 根據當前班別動態調整時段下拉的選項
+      updateSplitPeriodOptions();
     }
   }
 
@@ -7509,7 +7514,7 @@ function onSwapSplitToggle(){
   const noteRow = $('swapNoteRow');
   if(noteRow) noteRow.style.display = checked ? 'none' : '';
 
-  // 如果切到兩段班,確保兩個院區下拉已填入選項 (含外援)
+  // 如果切到兩段班,確保兩個院區下拉已填入選項 (含外援) + 時段下拉依當前班別調整
   if(checked){
     ['swapSplitBranch1','swapSplitBranch2'].forEach(id => {
       const sel = $(id);
@@ -7518,6 +7523,25 @@ function onSwapSplitToggle(){
           COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
       }
     });
+    updateSplitPeriodOptions();
+  }
+}
+
+// 依「當前 cell 班別」動態調整兩段班的時段下拉選項
+//   • 出勤 (12HR) → 三個選項 早/午/晚 (預設第 1 段=早、第 2 段=晚)
+//   • 早/午/晚 一般班別 → 兩個選項 第一段/第二段 (對應該 cell 內部的前後拆段)
+function updateSplitPeriodOptions(){
+  const sel1 = $('swapSplitPeriod1');
+  const sel2 = $('swapSplitPeriod2');
+  if(!sel1 || !sel2) return;
+  const shift = (_swapCtx && _swapCtx.shift) || '';
+  if(shift === '出勤'){
+    sel1.innerHTML = `<option value="早">早</option><option value="午">午</option><option value="晚">晚</option>`;
+    sel2.innerHTML = `<option value="早">早</option><option value="午">午</option><option value="晚" selected>晚</option>`;
+  } else {
+    // 一般班別:該 cell 拆兩段
+    sel1.innerHTML = `<option value="第一段">第一段</option>`;
+    sel2.innerHTML = `<option value="第二段">第二段</option>`;
   }
 }
 
