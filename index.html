@@ -2872,25 +2872,96 @@
               <!-- Filled by populateComboBlock -->
             </div>
           </div>
-          <div class="form-grid form-grid-2">
-            <div class="form-row">
-              <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
-              <select id="comboCoverBranch">
-                <option value="">— 請選擇 —</option>
-              </select>
+
+          <!-- 「該日為兩段班」開關 (combo 第二段) -->
+          <div id="comboSplitToggleRow" class="form-row" style="padding:10px 14px; background:#fef3c7; border:1px solid #e8d28a; border-radius:8px; margin-bottom:12px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500; margin:0;">
+              <input type="checkbox" id="comboSplitToggle" onchange="onComboSplitToggle()"/>
+              <span>該日為<b>兩段班</b> <span style="font-weight:400; color:var(--muted); font-size:12px;">— 同一 cell 拆兩組代班人員時勾選</span></span>
+            </label>
+          </div>
+
+          <!-- 一般單一代班 (預設) -->
+          <div id="comboSingleBlock">
+            <div class="form-grid form-grid-2">
+              <div class="form-row">
+                <label>代班人員院區 <span style="color:#c14a4a;">*</span></label>
+                <select id="comboCoverBranch">
+                  <option value="">— 請選擇 —</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
+                <input type="text" id="comboCoverName" placeholder="如:王小美"/>
+              </div>
             </div>
-            <div class="form-row">
-              <label>代班人員姓名 <span style="color:#c14a4a;">*</span></label>
-              <input type="text" id="comboCoverName" placeholder="如:王小美"/>
+            <div class="form-row" style="margin-top:8px; margin-bottom:0;">
+              <label>備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+              <input type="text" id="comboNote" placeholder="如:DR16"/>
+              <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+                排班表中代班人員姓名 (院區) 後方會顯示此備註
+              </div>
             </div>
           </div>
-          <div class="form-row" style="margin-top:8px; margin-bottom:0;">
-            <label>備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-            <input type="text" id="comboNote" placeholder="如:DR16"/>
-            <div style="font-size:12px; color:var(--muted); margin-top:4px;">
-              排班表中代班人員姓名 (院區) 後方會顯示此備註
+
+          <!-- 兩段班區塊 (勾選後才顯示) -->
+          <div id="comboSplitBlock" style="display:none;">
+            <div class="split-segment">
+              <div class="split-segment-head">第一段</div>
+              <div class="form-grid form-grid-3">
+                <div class="form-row">
+                  <label>時段 <span style="color:#c14a4a;">*</span></label>
+                  <select id="comboSplitPeriod1">
+                    <option value="早">早</option>
+                    <option value="午">午</option>
+                    <option value="晚">晚</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>代班院區 <span style="color:#c14a4a;">*</span></label>
+                  <select id="comboSplitBranch1">
+                    <option value="">— 請選擇 —</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>代班姓名 <span style="color:#c14a4a;">*</span></label>
+                  <input type="text" id="comboSplitName1" placeholder="如:王小美"/>
+                </div>
+              </div>
+              <div class="form-row" style="margin-bottom:0; margin-top:8px;">
+                <label>第一段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+                <input type="text" id="comboSplitNote1" placeholder="此段附註(例:DR16)"/>
+              </div>
+            </div>
+            <div class="split-segment">
+              <div class="split-segment-head">第二段</div>
+              <div class="form-grid form-grid-3">
+                <div class="form-row">
+                  <label>時段 <span style="color:#c14a4a;">*</span></label>
+                  <select id="comboSplitPeriod2">
+                    <option value="早">早</option>
+                    <option value="午">午</option>
+                    <option value="晚" selected>晚</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>代班院區 <span style="color:#c14a4a;">*</span></label>
+                  <select id="comboSplitBranch2">
+                    <option value="">— 請選擇 —</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>代班姓名 <span style="color:#c14a4a;">*</span></label>
+                  <input type="text" id="comboSplitName2" placeholder="如:張小帆"/>
+                </div>
+              </div>
+              <div class="form-row" style="margin-bottom:0; margin-top:8px;">
+                <label>第二段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
+                <input type="text" id="comboSplitNote2" placeholder="此段附註(例:DR47)"/>
+              </div>
             </div>
           </div>
+
           <div style="font-size:13px; color:var(--muted); margin-top:8px; padding:8px 12px; background:#f4f1e8; border-radius:6px;">
             💡 系統會自動建立 3 筆紀錄:換班雙向兩筆 + 第二段紀錄一筆。<br>
             原員工不影響上班日,對方因第二段原因字卡將顯示 −1。
@@ -6376,6 +6447,16 @@ function openSwapModal(date, shift, name){
   if($('comboCoverBranch')) $('comboCoverBranch').value = '';
   if($('comboNote')) $('comboNote').value = '';
   if($('comboReason')) $('comboReason').value = '缺人';
+  // combo 兩段班相關欄位重置
+  if($('comboSplitToggle')) $('comboSplitToggle').checked = false;
+  if($('comboSplitName1')) $('comboSplitName1').value = '';
+  if($('comboSplitBranch1')) $('comboSplitBranch1').value = '';
+  if($('comboSplitNote1')) $('comboSplitNote1').value = '';
+  if($('comboSplitName2')) $('comboSplitName2').value = '';
+  if($('comboSplitBranch2')) $('comboSplitBranch2').value = '';
+  if($('comboSplitNote2')) $('comboSplitNote2').value = '';
+  if($('comboSingleBlock')) $('comboSingleBlock').style.display = '';
+  if($('comboSplitBlock')) $('comboSplitBlock').style.display = 'none';
 
   if(existing){
     // Pre-fill form with existing values
@@ -6432,18 +6513,54 @@ function openSwapModal(date, shift, name){
         document.querySelectorAll('#comboReasonPills .reason-pill').forEach(p => {
           p.classList.toggle('active', p.dataset.reason === (rec3.reason || '缺人'));
         });
-        // coverName 解 "Name (Branch)"
-        const m = String(rec3.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
-        if(m){
-          if($('comboCoverName')) $('comboCoverName').value = m[1].trim();
-          if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('comboCoverBranch')){
-            $('comboCoverBranch').value = m[2].trim();
+        // 偵測是否為兩段班代班
+        if(isSplitSwap(rec3)){
+          // 確保兩個院區下拉先填好
+          ['comboSplitBranch1','comboSplitBranch2'].forEach(id => {
+            const sel = $(id);
+            if(sel){
+              sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+                COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+            }
+          });
+          updateComboSplitPeriodOptions();
+          const splits = rec3.swapWith || [];
+          if(splits[0]){
+            $('comboSplitPeriod1').value = splits[0].period || '第一段';
+            $('comboSplitBranch1').value = splits[0].branch || '';
+            $('comboSplitName1').value   = splits[0].name   || '';
+            $('comboSplitNote1').value   = splits[0].note   || '';
           }
-        } else if($('comboCoverName')){
-          $('comboCoverName').value = rec3.coverName || '';
+          if(splits[1]){
+            $('comboSplitPeriod2').value = splits[1].period || '第二段';
+            $('comboSplitBranch2').value = splits[1].branch || '';
+            $('comboSplitName2').value   = splits[1].name   || '';
+            $('comboSplitNote2').value   = splits[1].note   || '';
+          }
+          const cb = $('comboSplitToggle');
+          if(cb) cb.checked = true;
+          // 切換顯示
+          if($('comboSingleBlock')) $('comboSingleBlock').style.display = 'none';
+          if($('comboSplitBlock')) $('comboSplitBlock').style.display = '';
+        } else {
+          // 一般單一代班:coverName 解 "Name (Branch)"
+          const m = String(rec3.coverName || '').match(/^(.*?)\s*\((.+?)\)\s*$/);
+          if(m){
+            if($('comboCoverName')) $('comboCoverName').value = m[1].trim();
+            if(COVER_BRANCH_OPTIONS.includes(m[2].trim()) && $('comboCoverBranch')){
+              $('comboCoverBranch').value = m[2].trim();
+            }
+          } else if($('comboCoverName')){
+            $('comboCoverName').value = rec3.coverName || '';
+          }
+          // combo 備註 (剝除 [CG:xxx] 標記)
+          if($('comboNote')) $('comboNote').value = getCleanNote(rec3);
+          // 確保兩段班勾選為 false
+          const cb = $('comboSplitToggle');
+          if(cb) cb.checked = false;
+          if($('comboSingleBlock')) $('comboSingleBlock').style.display = '';
+          if($('comboSplitBlock')) $('comboSplitBlock').style.display = 'none';
         }
-        // combo 備註 (剝除 [CG:xxx] 標記)
-        if($('comboNote')) $('comboNote').value = getCleanNote(rec3);
       }
       // 顯示「取消設定」按鈕
       $('swapRestoreBtn').style.display = '';
@@ -6678,6 +6795,15 @@ function populateComboBlock(){
     const btn = pillsBox.querySelector(`[data-name="${cur}"]`);
     if(btn) btn.classList.add('active');
   }
+  // ③ combo 兩段班的院區下拉、時段下拉 (代班院區下拉 cbSel 已在前面初始化)
+  ['comboSplitBranch1','comboSplitBranch2'].forEach(id => {
+    const sel = $(id);
+    if(sel && sel.options.length <= 1){
+      sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+        COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+    }
+  });
+  updateComboSplitPeriodOptions();
 }
 
 function selectComboPartner(name){
@@ -7598,6 +7724,42 @@ function updateSplitPeriodOptions(){
   }
 }
 
+// combo 第二段:切換「該日為兩段班」開關 (跟 onSwapSplitToggle 並行)
+function onComboSplitToggle(){
+  const cb = $('comboSplitToggle');
+  const checked = cb ? cb.checked : false;
+  const single = $('comboSingleBlock');
+  const split  = $('comboSplitBlock');
+  if(single) single.style.display = checked ? 'none' : '';
+  if(split)  split.style.display  = checked ? '' : 'none';
+  if(checked){
+    // 確保兩個院區下拉已填入選項
+    ['comboSplitBranch1','comboSplitBranch2'].forEach(id => {
+      const sel = $(id);
+      if(sel && sel.options.length <= 1){
+        sel.innerHTML = `<option value="">— 請選擇 —</option>` +
+          COVER_BRANCH_OPTIONS.map(b => `<option value="${b}">${b}</option>`).join('');
+      }
+    });
+    updateComboSplitPeriodOptions();
+  }
+}
+
+// combo:依當前 cell 班別動態調整兩段班的時段下拉
+function updateComboSplitPeriodOptions(){
+  const sel1 = $('comboSplitPeriod1');
+  const sel2 = $('comboSplitPeriod2');
+  if(!sel1 || !sel2) return;
+  const shift = (_swapCtx && _swapCtx.shift) || '';
+  if(shift === '出勤'){
+    sel1.innerHTML = `<option value="早">早</option><option value="午">午</option><option value="晚">晚</option>`;
+    sel2.innerHTML = `<option value="早">早</option><option value="午">午</option><option value="晚" selected>晚</option>`;
+  } else {
+    sel1.innerHTML = `<option value="第一段">第一段</option>`;
+    sel2.innerHTML = `<option value="第二段">第二段</option>`;
+  }
+}
+
 async function submitSwap(){
   if(!_swapCtx){ closeModal('swapModal'); return; }
   if(!requireEditPermission()){ closeModal('swapModal'); return; }
@@ -7610,11 +7772,47 @@ async function submitSwap(){
     const partner = ($('comboPartner').value || '').trim();
     const partnerDate = ($('comboPartnerDate').value || '').trim();
     const partnerShift = ($('comboPartnerShift').value || '').trim();
-    const coverBranch = ($('comboCoverBranch').value || '').trim();
-    const coverNameRaw = ($('comboCoverName').value || '').trim();
     const seg2Reason = ($('comboReason').value || '缺人').trim();
     const seg2Cfg = SWAP_REASONS.find(r => r.id === seg2Reason);
     const seg2Mode = seg2Cfg ? seg2Cfg.mode : 'leave';
+
+    // 偵測兩段班勾選
+    const comboSplitToggle = $('comboSplitToggle');
+    const isComboSplit = comboSplitToggle && comboSplitToggle.checked;
+
+    // 代班資料變數 — 依 single / split 兩種模式不同來源
+    let coverBranch = '';
+    let coverNameRaw = '';
+    let comboSplitSegs = null;   // 兩段班時用
+
+    if(isComboSplit){
+      // 兩段班:取兩段時段、院區、姓名、各自備註
+      const p1 = ($('comboSplitPeriod1').value || '').trim();
+      const b1 = ($('comboSplitBranch1').value || '').trim();
+      const n1 = ($('comboSplitName1').value || '').trim();
+      const note1 = ($('comboSplitNote1').value || '').trim();
+      const p2 = ($('comboSplitPeriod2').value || '').trim();
+      const b2 = ($('comboSplitBranch2').value || '').trim();
+      const n2 = ($('comboSplitName2').value || '').trim();
+      const note2 = ($('comboSplitNote2').value || '').trim();
+      if(!p1 || !b1 || !n1){ toast('第二段代班 — 請完整填寫第一段:時段、代班院區、代班姓名','warn'); return; }
+      if(!p2 || !b2 || !n2){ toast('第二段代班 — 請完整填寫第二段:時段、代班院區、代班姓名','warn'); return; }
+      if(p1 === p2){ toast('第二段代班 — 兩段時段不可相同','warn'); return; }
+      comboSplitSegs = [
+        {__split:true, period:p1, branch:b1, name:n1, note:note1},
+        {__split:true, period:p2, branch:b2, name:n2, note:note2},
+      ];
+      // coverName 也填入概覽字串 (供 records 列表顯示)
+      coverNameRaw = `${p1}:${n1} (${b1}) / ${p2}:${n2} (${b2})`;
+      coverBranch = '';   // 兩段班無單一院區
+    } else {
+      // 一般單一代班
+      coverBranch = ($('comboCoverBranch').value || '').trim();
+      coverNameRaw = ($('comboCoverName').value || '').trim();
+      if(!coverBranch){ toast('請選擇代班人員院區','warn'); return; }
+      if(!coverNameRaw){ toast('請填寫代班人員姓名','warn'); return; }
+    }
+
     if(!partner){ toast('請選擇換班員工','warn'); return; }
     // 對方換班日期/班別:選填
     //   • 兩者都填 → 雙向換班 (建立 Rec1 + Rec2 + Rec3,共 3 筆)
@@ -7630,8 +7828,6 @@ async function submitSwap(){
     if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班' || seg2Reason === '私事支援'){
       toast('第二段原因不可為「換班」、「換班+代班」或「私事支援」','warn'); return;
     }
-    if(!coverBranch){ toast('請選擇代班人員院區','warn'); return; }
-    if(!coverNameRaw){ toast('請填寫代班人員姓名','warn'); return; }
     if(!isOneWay && partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
       toast('換班日期/班別不可與本班相同','warn'); return;
     }
@@ -7665,8 +7861,10 @@ async function submitSwap(){
         }
       }
     }
-    const recNote = ($('comboNote').value || '').trim();
-    const coverFull = `${coverNameRaw} (${coverBranch})`;
+    // 兩段班時 comboNote 沒用 (改用每段內備註),用 single 時取 comboNote
+    const recNote = isComboSplit ? '' : (($('comboNote').value || '').trim());
+    // coverFull: single 時 = "姓名 (院區)";split 時 = 概覽字串 (已在上方 coverNameRaw 處理)
+    const coverFull = isComboSplit ? coverNameRaw : `${coverNameRaw} (${coverBranch})`;
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
     // combo 群組識別碼:同群組共用,以利 restoreOriginalSwap 一併取消
@@ -7708,6 +7906,7 @@ async function submitSwap(){
     };
     // Rec 3: 本班 partner 缺人/支援/假別,由代班人員代 — 依使用者選的第二段原因
     // note 開頭含 comboGroupId 標記,後接使用者實際輸入備註
+    // 兩段班時:swapWith 放兩段 split segments;否則為空(走 coverName 路徑)
     const rec3 = {
       id: 'STMP' + (baseTime+2) + Math.floor(Math.random()*100),
       branch: State.currentBranch,
@@ -7717,7 +7916,7 @@ async function submitSwap(){
       originalName: partner,
       reason: seg2Reason,
       mode: seg2Mode,
-      swapWith: [],
+      swapWith: isComboSplit ? comboSplitSegs : [],
       coverName: coverFull,
       note: recNote ? `${comboTag} ${recNote}` : comboTag,
       createdAt: sharedCreatedAt,
