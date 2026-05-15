@@ -3722,7 +3722,28 @@ function detectWorkBalanceIssues(unsavedRecords){
   // 把 unsaved 的 swap 加到目前 State.swaps 裡一起算 (它們已經在 State.swaps 裡了,
   // 因為 _unsaved 是 flag 不是分開存)
   // 直接掃所有 swap mode 的紀錄,找出沒配對的
-  const allSwaps = (State.swaps || []).filter(s => s.mode === 'swap');
+  // 但若該紀錄所屬的 8 週區間「已結束」(endDate < 今日) → 跳過,不再累計
+  const todayStr = fmt(new Date());
+  // helper:該紀錄是否屬於「已結束」區間
+  const isInEndedPeriod = (s) => {
+    const settings = ((State.settings || {})[s.branch] || {})[s.position];
+    if(!settings || !settings.periods) return false;
+    // 找該紀錄日期落在哪個區間
+    const period = settings.periods.find(p => {
+      if(!p.startDate) return false;
+      const startD = parseDate(p.startDate);
+      const endD = addDays(startD, 8*7-1);
+      const dt = parseDate(s.date);
+      return dt >= startD && dt <= endD;
+    });
+    if(!period) return false;
+    // 該區間 endDate < 今日 → 已結束
+    const endD = addDays(parseDate(period.startDate), 8*7-1);
+    return fmt(endD) < todayStr;
+  };
+  const allSwaps = (State.swaps || []).filter(s =>
+    s.mode === 'swap' && !isInEndedPeriod(s)
+  );
   // 按 (branch, position) 分組
   const byBranchPos = {};
   allSwaps.forEach(s => {
