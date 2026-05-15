@@ -5986,21 +5986,19 @@ function onCellClick(date, shift, name, evt){
       );
       return;
     }
-    // 若該 cell 已被管理員設為「請假/缺人」紀錄(紅底),員工不可再申請異動
-    // — 已由管理員處理,員工無權再對此格申請(避免重複/衝突)
-    // 提示時不洩露假別名稱(隱私考量),只說「已調整」
-    const existingLeave = (State.swaps || []).find(s =>
+    // 若該 cell 已有任何異動紀錄 (swap / leave / support / combo) → 員工不可再申請
+    // 只有管理員可再次調整。提示時不洩露細節 (隱私考量)
+    const existingRec = (State.swaps || []).find(s =>
       s.branch === State.currentBranch &&
       s.position === State.currentPosition &&
       s.date === date &&
       s.shift === shift &&
-      s.mode === 'leave' &&
       !isPendingApplication(s)   // 排除「員工申請中(尚未 approve)」的紀錄
     );
-    if(existingLeave){
+    if(existingRec){
       // 用畫面中央 modal 提醒(toast 在右上角不夠明顯,使用者可能誤以為點擊無反應)
       showAlertModal(
-        '此班別已由管理員調整,無法再申請異動。<br><br>如有疑問請聯繫管理員。',
+        '此班別已有異動紀錄,無法再申請。<br><br>如需調整,請聯繫管理員。',
         { icon: '🔒', title: '無法申請異動', duration: 4000 }
       );
       return;
