@@ -8392,12 +8392,21 @@ async function autoGenerate(){
       // ─── 保護日:已有異動紀錄 → 整天沿用舊 cell ──────────────────
       // 不重生此日,確保既有 swap/leave/support/combo 紀錄的 originalName 仍對應到舊 cell
       if(protectedDates.has(ds)){
-        if(oldShifts[ds]){
-          shifts[ds] = JSON.parse(JSON.stringify(oldShifts[ds]));
+        const oc = oldShifts[ds];
+        // 注意:舊 cell 可能是 {morning:[], evening:[]} 這種空 object
+        // (歷史 bug 或自動排班失敗留下的空殼) — 這種情況不該保留,應該重生
+        const ocHasContent = oc && (
+          (oc.morning && oc.morning.length) ||
+          (oc.noon && oc.noon.length) ||
+          (oc.evening && oc.evening.length) ||
+          (oc.attendance && oc.attendance.length)
+        );
+        if(ocHasContent){
+          shifts[ds] = JSON.parse(JSON.stringify(oc));
           preservedDayCount++;
           continue;
         }
-        // 舊 sheet 沒這日的資料(理論上不應該,但安全起見) — 仍按規則生
+        // 舊 sheet 該日為空 (或不存在) — 仍按規則生
       }
 
       const day = {morning:[], noon:[], evening:[], attendance:[], off:[]};
@@ -9649,7 +9658,74 @@ async function downloadA4(){
       html += `<tr><td style="color:var(--muted); font-size:11px; text-align:center; padding:4px 2px;">${shift}</td>`;
       for(let d=0; d<7; d++){
         const ds = fmt(addDays(startD,w*7+d));
-        const cell = (sched.shifts[ds]||{})[shiftKey(shift)] || [];
+        let cell = (sched.shifts[ds]||{})[shiftKey(shift)] || [];
+        // ─── orphan fallback (跟前台 renderScheduleTable 一致) ────
+        // 若 cell 中的姓名不在當前 employees 名單 (歷史殘留),
+        // 用「現場計算」算出該 cell 該班別應該是誰,取代 orphan
+        if(cell.length){
+          const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+          const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
+          // 現場計算結果 cache (僅 cell 中有 orphan 時才算)
+          let _a4Computed = null;
+          const _a4GetComputed = () => {
+            if(_a4Computed === null){
+              // inline 現場計算 (跟 renderScheduleTable 的 computeShiftCell 一致)
+              const result = {morning:[], noon:[], evening:[], attendance:[]};
+              const dt = parseDate(ds);
+              const dayDiff = Math.floor((dt - startD) / 86400000);
+              const _pattern = setting.rules.cyclePattern || [];
+              const _absPIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+              const _pOffset = (_absPIdx >= 0 ? _absPIdx : 0) * 56;
+              const _morn = setting.rules.morningCount || 0;
+              const _noon = setting.rules.noonCount || 0;
+              const _eve  = setting.rules.eveningCount || 0;
+              const _att  = setting.rules.attendanceCount || 0;
+              if(_pattern.length && dayDiff >= 0 && dayDiff < 56){
+                const _seen = new Set();
+                const _uniq = [];
+                for(let i = dayEffEmps.length - 1; i >= 0; i--){
+                  const emp = dayEffEmps[i];
+                  if(!emp || !emp.group || !emp.name) continue;
+                  if(emp.name === emp.group) continue;
+                  if(_seen.has(emp.group)) continue;
+                  _seen.add(emp.group);
+                  _uniq.unshift(emp);
+                }
+                _uniq.forEach(emp => {
+                  const cycPos = ((emp.startIndex - 1) + _pOffset + dayDiff) % _pattern.length;
+                  const sym = _pattern[cycPos];
+                  if(sym === '早'){ if(_morn === 0 || result.morning.length < _morn) result.morning.push(emp.name); }
+                  else if(sym === '午'){ if(_noon === 0 || result.noon.length < _noon) result.noon.push(emp.name); }
+                  else if(sym === '晚'){ if(_eve === 0 || result.evening.length < _eve) result.evening.push(emp.name); }
+                  else if(sym === '出勤'){ if(_att === 0 || result.attendance.length < _att) result.attendance.push(emp.name); }
+                });
+              }
+              _a4Computed = result;
+            }
+            return _a4Computed;
+          };
+          cell = cell.map(n => {
+            if(!n) return n;
+            if(validNames.has(n)) return n;
+            if(n === 'A' || n === 'B' || n === 'C' || n === 'D'){
+              const computed = _a4GetComputed();
+              const computedNames = computed[shiftKey(shift)] || [];
+              const altEff = dayEffEmps.find(e => e.group === n);
+              if(altEff && computedNames.includes(altEff.name)) return altEff.name;
+              return null;
+            }
+            // 歷史殘留 → 取現場計算結果取代
+            const computed = _a4GetComputed();
+            const computedNames = computed[shiftKey(shift)] || [];
+            if(computedNames.length === 1) return computedNames[0];
+            if(computedNames.length > 1){
+              const matched = computedNames.find(cn => cn === n || cn.startsWith(n) || n.startsWith(cn));
+              if(matched) return matched;
+              return computedNames[0];
+            }
+            return null;
+          }).filter(n => n !== null);
+        }
         html += `<td style="text-align:center; padding:3px 2px;">${cell.length? cell.map(n=>{
           const dateGroupOf = a4GroupOfFor(ds);
           const g = dateGroupOf[n] || groupOf[n] || 'A';
@@ -9671,7 +9747,11 @@ async function downloadA4(){
               // 兩段班:依時段順序顯示兩段(時段標籤 + 姓名 + 院區+備註合併同行)
               displayHtml = swap.swapWith.map((c, i) => {
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
-                const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                // 「第一段/第二段」標籤無新資訊,省略;只顯示有意義的時段 (早/午/晚)
+                const periodLabel = (c.period === '第一段' || c.period === '第二段') ? '' : (c.period || '');
+                const periodHtml = periodLabel
+                  ? `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${periodLabel}</span>`
+                  : '';
                 // 院區 + 備註合併同一行 (同字體大小)
                 const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
@@ -9964,7 +10044,10 @@ async function downloadA4PartTime(){
               // 兩段班 (理論上工讀不會出現,但保留通用渲染避免異常顯示)
               displayHtml = swap.swapWith.map((c, i) => {
                 const sep = i > 0 ? '<span style="display:block; height:0; margin:2px 0; border-top:1px dashed currentColor; opacity:0.4;"></span>' : '';
-                const periodHtml = `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${c.period||''}</span>`;
+                const periodLabel = (c.period === '第一段' || c.period === '第二段') ? '' : (c.period || '');
+                const periodHtml = periodLabel
+                  ? `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${periodLabel}</span>`
+                  : '';
                 // 院區 + 備註合併同一行
                 const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
