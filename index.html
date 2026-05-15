@@ -5808,16 +5808,25 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
     const g = groupOf[n] || 'A';
     let swap = swapMap[dateStr+'_'+shift+'_'+n];
 
-    // ─── 鏈式追蹤 (combo 場景) ─────────────────────────────────────
-    // 「換班+代班」會建立 3 筆紀錄,該 cell 的「曾」→ swap → B,
-    // 而 B 那位置又有 leave (代班人員)。原本 swap chain 只追到第一層 swap,
-    // 看不到後續的 leave。這裡若偵測到 swap.mode==='swap',再用 swapWith[0]
-    // 當原員工去查 swapMap 中是否還有更後續的紀錄,把最終那筆當作真正顯示用 swap。
+    // ─── 鏈式追蹤 ──────────────────────────────────────────────────
+    // 兩種情境:
+    //   1. 多層 swap chain:亦淳→A (Rec1) → A 又被換給 畇筑 (Rec3)
+    //      Final 顯示為 畇筑 (灰底)
+    //   2. combo 場景:cell 的「曾」→ swap → B,而 B 那位置又有 leave
+    //      Final 顯示為代班人員 (紅/黃底)
+    // 演算法:從 swap.swapWith[0] 為新 originalName,持續查 swapMap 直到下一層不再是 swap
+    //      或形成循環(原員工)為止。最多追 10 層避免無窮迴圈。
     if(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0]){
-      const next = swapMap[dateStr+'_'+shift+'_'+swap.swapWith[0]];
-      if(next && next.mode !== 'swap'){
-        // 第二層是 leave/support → 用第二層當顯示對象 (代班人員紅/黃底)
+      const visited = new Set([n]);
+      let depth = 0;
+      while(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0] && depth < 10){
+        const nextName = swap.swapWith[0];
+        if(visited.has(nextName)) break;   // 循環,停
+        visited.add(nextName);
+        const next = swapMap[dateStr+'_'+shift+'_'+nextName];
+        if(!next) break;
         swap = next;
+        depth++;
       }
     }
 
@@ -6033,7 +6042,15 @@ function onCellClick(date, shift, name, evt){
     handleQuickSwapClick(date, shift, displayName);
     return;
   }
-  openSwapModal(date, shift, name);
+  // 一般 swap modal:也用「畫面顯示的人」當 ctx.name
+  // 這樣多次連續換班 chain 才不會 originalName 互相衝突 (例如 A→B 後 B→C,
+  // 若仍用 sheet 原 name 兩筆 record 都會 originalName=亦淳,後者覆蓋前者)。
+  let actualName = name;
+  const targetElGen = evt && evt.target ? evt.target.closest('.name-pill') : null;
+  if(targetElGen && targetElGen.dataset && targetElGen.dataset.displayName){
+    actualName = targetElGen.dataset.displayName;
+  }
+  openSwapModal(date, shift, actualName);
 }
 
 // ─── 快速換班 (Quick Swap) ────────────────────────────────────────
@@ -9731,15 +9748,19 @@ async function downloadA4(){
           const g = dateGroupOf[n] || groupOf[n] || 'A';
           let swap = swapMap[ds+'_'+shift+'_'+n];
 
-          // ─── 鏈式追蹤 (combo 場景) — 跟前台 renderCell 一致 ────────
-          // 「換班+代班」會建立 3 筆紀錄,該 cell 的「顯陞」→ swap → 王彥儒,
-          // 而 王彥儒 那位置又有 leave (代班人員)。
-          // 這裡若偵測到 swap.mode==='swap',再用 swapWith[0] 當原員工查 swapMap
-          // 是否還有更後續的紀錄,把最終那筆當作真正顯示用 swap。
+          // ─── 多層 swap chain 鏈式追蹤 (跟前台 renderCell 一致) ────────
+          // 從 swap.swapWith[0] 持續查 swapMap 直到下一層不再是 swap 或形成循環
           if(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0]){
-            const next = swapMap[ds+'_'+shift+'_'+swap.swapWith[0]];
-            if(next && next.mode !== 'swap'){
+            const visited = new Set([n]);
+            let depth = 0;
+            while(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0] && depth < 10){
+              const nextName = swap.swapWith[0];
+              if(visited.has(nextName)) break;
+              visited.add(nextName);
+              const next = swapMap[ds+'_'+shift+'_'+nextName];
+              if(!next) break;
               swap = next;
+              depth++;
             }
           }
 
