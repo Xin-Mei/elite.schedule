@@ -6772,12 +6772,12 @@ function populateComboBlock(){
         shiftOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
     shSel.innerHTML = head;
   }
-  // ② 第二段原因 pills — 排除「換班」、「換班+代班」、「私事支援」
-  // (combo 不該再走 combo;私事支援由使用者透過獨立的「私事支援」原因處理)
+  // ② 第二段原因 pills — 排除「換班」、「換班+代班」
+  // (combo 不該再走 combo;私事支援允許作為第二段原因)
   const reasonBox = $('comboReasonPills');
   if(reasonBox){
     const candidates = SWAP_REASONS.filter(r =>
-      r.id !== '換班' && r.id !== '換班+代班' && r.id !== '私事支援'
+      r.id !== '換班' && r.id !== '換班+代班'
     );
     reasonBox.innerHTML = candidates.map(r =>
       `<button type="button" class="reason-pill ${r.id === '缺人' ? 'active' : ''}" data-reason="${r.id}" data-mode="${r.mode}" onclick="selectComboReason('${r.id}')">${r.label}</button>`
@@ -7825,8 +7825,8 @@ async function submitSwap(){
       return;
     }
     const isOneWay = !hasPartnerDate;   // 兩者都空 → 單向換班
-    if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班' || seg2Reason === '私事支援'){
-      toast('第二段原因不可為「換班」、「換班+代班」或「私事支援」','warn'); return;
+    if(!seg2Reason || seg2Reason === '換班' || seg2Reason === '換班+代班'){
+      toast('第二段原因不可為「換班」或「換班+代班」','warn'); return;
     }
     if(!isOneWay && partnerDate === _swapCtx.date && partnerShift === _swapCtx.shift){
       toast('換班日期/班別不可與本班相同','warn'); return;
