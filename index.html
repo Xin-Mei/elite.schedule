@@ -9729,7 +9729,20 @@ async function downloadA4(){
         html += `<td style="text-align:center; padding:3px 2px;">${cell.length? cell.map(n=>{
           const dateGroupOf = a4GroupOfFor(ds);
           const g = dateGroupOf[n] || groupOf[n] || 'A';
-          const swap = swapMap[ds+'_'+shift+'_'+n];
+          let swap = swapMap[ds+'_'+shift+'_'+n];
+
+          // ─── 鏈式追蹤 (combo 場景) — 跟前台 renderCell 一致 ────────
+          // 「換班+代班」會建立 3 筆紀錄,該 cell 的「顯陞」→ swap → 王彥儒,
+          // 而 王彥儒 那位置又有 leave (代班人員)。
+          // 這裡若偵測到 swap.mode==='swap',再用 swapWith[0] 當原員工查 swapMap
+          // 是否還有更後續的紀錄,把最終那筆當作真正顯示用 swap。
+          if(swap && swap.mode === 'swap' && Array.isArray(swap.swapWith) && swap.swapWith[0]){
+            const next = swapMap[ds+'_'+shift+'_'+swap.swapWith[0]];
+            if(next && next.mode !== 'swap'){
+              swap = next;
+            }
+          }
+
           if(swap){
             // Parse "Name (Branch)" into name + branch parts
             const parseCover = (str) => {
