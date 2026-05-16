@@ -6243,6 +6243,18 @@ function confirmQuickSwapPick(targetName, targetGroup){
     }
   });
 
+  // 還原情境:使用者選的 target 就是 sheet 原排班員工 → 等於「取消換班」
+  //   只刪除舊 swap (前面已處理) + 不再建立新 record,讓 cell 變回原色
+  if(targetName === originalName){
+    closeModal('quickSwapPickerModal');
+    _quickSwapPending = null;
+    renderBranch();
+    if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
+    applyQuickSwapUI();
+    toast(`已恢復原排班:${date.slice(5).replace('-','/')} ${shift} → ${originalName} (待儲存)`);
+    return;
+  }
+
   // 建立單向 swap record (沒有配對 — 故意造成工時不平衡,讓警示系統提醒)
   const baseTime = Date.now();
   const newRec = {
