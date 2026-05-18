@@ -2897,7 +2897,7 @@
             </div>
             <div class="form-row" style="margin-top:8px; margin-bottom:0;">
               <label>備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-              <input type="text" id="comboNote" placeholder="如:DR16"/>
+              <textarea id="comboNote" rows="2" placeholder="如:DR16 (可按 Enter 換行)" style="font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid #d6d6d6; border-radius:6px; width:100%; resize:vertical;"></textarea>
               <div style="font-size:12px; color:var(--muted); margin-top:4px;">
                 排班表中代班人員姓名 (院區) 後方會顯示此備註
               </div>
@@ -2930,7 +2930,7 @@
               </div>
               <div class="form-row" style="margin-bottom:0; margin-top:8px;">
                 <label>第一段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-                <input type="text" id="comboSplitNote1" placeholder="此段附註(例:DR16)"/>
+                <textarea id="comboSplitNote1" rows="2" placeholder="此段附註(例:DR16,可按 Enter 換行)" style="font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid #d6d6d6; border-radius:6px; width:100%; resize:vertical;"></textarea>
               </div>
             </div>
             <div class="split-segment">
@@ -2957,7 +2957,7 @@
               </div>
               <div class="form-row" style="margin-bottom:0; margin-top:8px;">
                 <label>第二段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-                <input type="text" id="comboSplitNote2" placeholder="此段附註(例:DR47)"/>
+                <textarea id="comboSplitNote2" rows="2" placeholder="此段附註(例:DR47,可按 Enter 換行)" style="font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid #d6d6d6; border-radius:6px; width:100%; resize:vertical;"></textarea>
               </div>
             </div>
           </div>
@@ -3005,7 +3005,7 @@
             </div>
             <div class="form-row" style="margin-bottom:0; margin-top:8px;">
               <label>第一段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-              <input type="text" id="swapSplitNote1" placeholder="此段附註(例:DR16)"/>
+              <textarea id="swapSplitNote1" rows="2" placeholder="此段附註(例:DR16,可按 Enter 換行)" style="font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid #d6d6d6; border-radius:6px; width:100%; resize:vertical;"></textarea>
             </div>
           </div>
           <div class="split-segment">
@@ -3032,7 +3032,7 @@
             </div>
             <div class="form-row" style="margin-bottom:0; margin-top:8px;">
               <label>第二段備註 <span style="color:var(--muted); font-weight:normal; font-size:12px;">(選填)</span></label>
-              <input type="text" id="swapSplitNote2" placeholder="此段附註(例:DR47)"/>
+              <textarea id="swapSplitNote2" rows="2" placeholder="此段附註(例:DR47,可按 Enter 換行)" style="font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid #d6d6d6; border-radius:6px; width:100%; resize:vertical;"></textarea>
             </div>
           </div>
           <div style="font-size:13px; color:var(--muted); margin-top:6px;">
@@ -5883,12 +5883,12 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
           const segNoteText = String(c.note || '').trim();
           const branchText = String(c.branch || '').trim();
           if(branchText && segNoteText){
-            const safeNote = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const safeNote = escNoteWithBR(segNoteText);
             metaText = `${branchText} ${safeNote}`;
           } else if(branchText){
             metaText = branchText;
           } else if(segNoteText){
-            metaText = segNoteText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            metaText = escNoteWithBR(segNoteText);
           }
           const metaHtml = metaText ? `<span class="cover-branch">${metaText}</span>` : '';
           // 時段標籤:只顯示有意義的 (早/午/晚 — 12HR 拆段情境);
@@ -5903,10 +5903,11 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
         const noteForLine = getCleanNote(swap);
-        const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+        // 院區 + 備註合併,備註 escape + 換行
+        const safeNote = escNoteWithBR(noteForLine);
+        const meta = [cv.branch, safeNote].filter(Boolean).join(' ');
         if(meta){
-          const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          pillContent += `<span class="cover-branch">${safe}</span>`;
+          pillContent += `<span class="cover-branch">${meta}</span>`;
         }
         modeClass = 'mode-support';
       } else {
@@ -5914,10 +5915,10 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
         const cv = parseCover(swap.coverName || n);
         pillContent = cv.name;
         const noteForLine = getCleanNote(swap);
-        const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
+        const safeNote = escNoteWithBR(noteForLine);
+        const meta = [cv.branch, safeNote].filter(Boolean).join(' ');
         if(meta){
-          const safe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          pillContent += `<span class="cover-branch">${safe}</span>`;
+          pillContent += `<span class="cover-branch">${meta}</span>`;
         }
         modeClass = 'mode-leave';
       }
@@ -6387,6 +6388,16 @@ function getComboGroupId(rec){
 function getCleanNote(rec){
   if(!rec || !rec.note) return '';
   return String(rec.note).replace(/^\[CG:\d+\]\s*/, '').trim();
+}
+
+// 對備註做 HTML escape 並把 \n 轉為 <br>,讓多行備註可在 cell 中正確顯示換行
+function escNoteWithBR(s){
+  if(!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r\n|\r|\n/g, '<br>');
 }
 
 // 找出與 rec 同一個 combo 群組的所有其他紀錄
@@ -9817,16 +9828,16 @@ async function downloadA4(){
                 const periodHtml = periodLabel
                   ? `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${periodLabel}</span>`
                   : '';
-                // 院區 + 備註合併同一行 (同字體大小)
+                // 院區 + 備註合併同一行 (備註支援多行 \n → <br>)
                 const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
                 let metaText = '';
                 if(branchText && segNote){
-                  metaText = `${branchText} ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                  metaText = `${branchText} ${escNoteWithBR(segNote)}`;
                 } else if(branchText){
                   metaText = branchText;
                 } else if(segNote){
-                  metaText = segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                  metaText = escNoteWithBR(segNote);
                 }
                 const metaHtml = metaText
                   ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${metaText}</span>`
@@ -9838,16 +9849,16 @@ async function downloadA4(){
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
               const noteForLine = getCleanNote(swap);
-              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
-              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
+              const safeNote = escNoteWithBR(noteForLine);
+              const metaSafe = [cv.branch, safeNote].filter(Boolean).join(' ');
+              displayHtml = cv.name + (metaSafe ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';   // 柔和的暖黃
             } else {
               const cv = parseCover(swap.coverName || n);
               const noteForLine = getCleanNote(swap);
-              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
-              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
+              const safeNote = escNoteWithBR(noteForLine);
+              const metaSafe = [cv.branch, safeNote].filter(Boolean).join(' ');
+              displayHtml = cv.name + (metaSafe ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
             // 備註已合併到 cover-branch 同行,此處不重複輸出
@@ -10113,16 +10124,16 @@ async function downloadA4PartTime(){
                 const periodHtml = periodLabel
                   ? `<span style="display:inline-block; font-size:9px; font-weight:700; padding:1px 3px; margin-right:2px; border-radius:3px; background:rgba(0,0,0,0.08); letter-spacing:1px;">${periodLabel}</span>`
                   : '';
-                // 院區 + 備註合併同一行
+                // 院區 + 備註合併同一行 (備註支援多行 \n → <br>)
                 const branchText = String(c.branch || '').trim();
                 const segNote = String(c.note || '').trim();
                 let metaText = '';
                 if(branchText && segNote){
-                  metaText = `${branchText} ${segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+                  metaText = `${branchText} ${escNoteWithBR(segNote)}`;
                 } else if(branchText){
                   metaText = branchText;
                 } else if(segNote){
-                  metaText = segNote.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                  metaText = escNoteWithBR(segNote);
                 }
                 const metaHtml = metaText
                   ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px;">${metaText}</span>`
@@ -10134,16 +10145,16 @@ async function downloadA4PartTime(){
             } else if(swap.mode === 'support'){
               const cv = parseCover(swap.coverName || n);
               const noteForLine = getCleanNote(swap);
-              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
-              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
+              const safeNote = escNoteWithBR(noteForLine);
+              const metaSafe = [cv.branch, safeNote].filter(Boolean).join(' ');
+              displayHtml = cv.name + (metaSafe ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fef3c7'; fg = '#5e4914';
             } else {
               const cv = parseCover(swap.coverName || n);
               const noteForLine = getCleanNote(swap);
-              const meta = [cv.branch, noteForLine].filter(Boolean).join(' ');
-              const metaSafe = meta.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              displayHtml = cv.name + (meta ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
+              const safeNote = escNoteWithBR(noteForLine);
+              const metaSafe = [cv.branch, safeNote].filter(Boolean).join(' ');
+              displayHtml = cv.name + (metaSafe ? `<span style="display:block; font-size:9px; font-weight:400; opacity:0.8; margin-top:1px; word-break:break-word; white-space:normal; line-height:1.25;">${metaSafe}</span>` : '');
               bg = '#fde6e6'; fg = '#a83838';
             }
             // 備註已合併到 cover-branch 同行,此處不重複輸出
