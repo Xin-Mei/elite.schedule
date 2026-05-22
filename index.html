@@ -6062,15 +6062,11 @@ function onCellClick(date, shift, name, evt){
     handleQuickSwapClick(date, shift, displayName);
     return;
   }
-  // 一般 swap modal:也用「畫面顯示的人」當 ctx.name
-  // 這樣多次連續換班 chain 才不會 originalName 互相衝突 (例如 A→B 後 B→C,
-  // 若仍用 sheet 原 name 兩筆 record 都會 originalName=亦淳,後者覆蓋前者)。
-  let actualName = name;
-  const targetElGen = evt && evt.target ? evt.target.closest('.name-pill') : null;
-  if(targetElGen && targetElGen.dataset && targetElGen.dataset.displayName){
-    actualName = targetElGen.dataset.displayName;
-  }
-  openSwapModal(date, shift, actualName);
+  // 一般 swap modal:用 onclick 傳入的 name (sheet 原排班員工)
+  // 註:先前曾改用 displayName(畫面顯示的人)以支援多重連續 chain,
+  //    但在「cell 有 leave/缺人 紀錄」或「畫面顯示≠sheet原人」時會抓錯 originalName,
+  //    導致換班 record 錯位。多重 chain 場景改用「快速換班」達成較安全。
+  openSwapModal(date, shift, name);
 }
 
 // ─── 快速換班 (Quick Swap) ────────────────────────────────────────
@@ -10476,7 +10472,7 @@ async function doEmployeeLogin(){
   }
 
   showLoading('驗證身分中…');
-  const res = await api('verifyEmployee', {employeeId: id, password: pwd});
+  const res = await api('verifyEmployee', {employeeId: id, password: pwd, userAgent: navigator.userAgent});
   hideLoading();
 
   if(!res.ok){
@@ -10613,7 +10609,7 @@ async function doAdminLogin(){
 
   // Reuse the unified verifyEmployee endpoint
   showLoading('驗證中…');
-  const res = await api('verifyEmployee', {employeeId: account, password: pwd});
+  const res = await api('verifyEmployee', {employeeId: account, password: pwd, userAgent: navigator.userAgent});
   hideLoading();
   if(!res.ok || !res.user || res.user.role !== 'admin'){
     if(errBox){
