@@ -4768,6 +4768,9 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   });
   const weekDayLabels = ['日','一','二','三','四','五','六'];
   const isAdmin = State.user.role === 'admin';
+  // 編輯權限:admin 全院區,manager 限可管理的院區 (與 onPartTimeSlotClick 的權限一致)
+  // 用於診助上班時間、批次填入、人員池新增/刪除等編輯入口的顯示判斷
+  const canEdit = (typeof canEditCurrentBranch === 'function') ? canEditCurrentBranch() : isAdmin;
   // 工讀人員池:admin / manager 看得到並可管理;員工看不到
   const canSeePartTimePool = State.user && (State.user.role === 'admin' || State.user.role === 'manager');
   const hoursTableHtml = `
@@ -4775,7 +4778,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <thead>
         <tr>
           <th colspan="7" style="text-align:left; padding:8px 14px; background:var(--teal-50); font-family:'Noto Serif TC',serif; font-size:15px; color:var(--teal-900); letter-spacing:2px;">
-            ⏰ 診助上班時間 ${isAdmin ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
+            ⏰ 診助上班時間 ${canEdit ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
           </th>
         </tr>
         <tr>
@@ -4785,8 +4788,8 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <tbody>
         <tr>
           ${weekHours.map((h, i) => {
-            const cls = isAdmin ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
-            const onclick = isAdmin ? `onclick="editPtcHours(${i})"` : '';
+            const cls = canEdit ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
+            const onclick = canEdit ? `onclick="editPtcHours(${i})"` : '';
             const r1 = h.r1 ? h.r1 : '<span class="ptc-hours-empty">—</span>';
             const r2 = h.r2 ? h.r2 : '<span class="ptc-hours-empty">—</span>';
             return `<td class="${cls}" ${onclick}>
@@ -4799,7 +4802,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </table>`;
 
   // ─── 批次填入工具列 (僅管理員) ───────────────────────────────────────
-  const bulkToolbarHtml = isAdmin ? `
+  const bulkToolbarHtml = canEdit ? `
     <div class="ptc-bulk-toolbar">
       <span class="ptc-bulk-info">⚡ 批次填入:</span>
       <button class="btn" onclick="openPtcBulkFill('weekday')">📅 依星期幾批次填</button>
@@ -4816,15 +4819,15 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
                ondragstart="onPtcStaffDragStart(event, '${n.replace(/'/g,"\\'")}')"
                ondragend="onPtcStaffDragEnd(event)">
            <span class="ptc-staff-name">${n}</span>
-           ${isAdmin ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
+           ${canEdit ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
          </span>`
       ).join('')
     : '<span style="color:var(--muted); font-size:13px;">尚未設定工讀人員</span>';
   const staffPoolHtml = canSeePartTimePool ? `
     <div class="ptc-staff-pool">
       <div class="ptc-staff-pool-head">
-        <span class="ptc-staff-pool-title">👥 工讀人員池 ${isAdmin ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
-        ${isAdmin ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
+        <span class="ptc-staff-pool-title">👥 工讀人員池 ${canEdit ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
+        ${canEdit ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
       </div>
       <div class="ptc-staff-chips">${staffChipsHtml}</div>
     </div>
@@ -8187,6 +8190,16 @@ async function submitSwap(){
 }
 
 // ─── BATCH SAVE: flush all unsaved changes to Sheet ─────────────────────
+// 取得目前操作者標籤 (用於 _缺人紀錄 的 operator 欄,區分管理員/主管/員工)
+function getOperatorLabel(){
+  const u = State.user || {};
+  const name = String(u.name || u.account || u.employeeId || '').trim();
+  if(u.role === 'admin')   return name ? `${name} (管理員)` : '管理員';
+  if(u.role === 'manager') return name ? `${name} (主管)`   : '主管';
+  if(name) return name;   // 一般員工 — 直接記姓名
+  return '未知';
+}
+
 async function flushUnsavedChanges(){
   const unsaved = (State.swaps||[]).filter(s=>s._unsaved);
   const deletions = State.pendingDeletions || [];
@@ -8232,6 +8245,10 @@ async function flushUnsavedChanges(){
     delete cleanRec._unsaved;
     // Replace temp id with real one
     cleanRec.id = (rec.mode === 'leave' ? 'L' : 'S') + Date.now() + Math.floor(Math.random()*1000);
+    // 「缺人」紀錄:附上操作者身分 (寫入 _缺人紀錄 的 operator 欄)
+    if(rec.mode === 'leave' && String(rec.reason || '').trim() === '缺人'){
+      cleanRec.operator = getOperatorLabel();
+    }
     const apiAction = (rec.mode === 'leave') ? 'addLeave' : 'addSwap';
     const res = await api(apiAction, {record: cleanRec});
     if(!res.ok){
