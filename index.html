@@ -4877,7 +4877,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
         }
         const cell = monthSched.shifts[ds] || {};
         const names = (cell[sr.key] || []).filter(n=>n);
-        const dragAttrs = isAdmin
+        const dragAttrs = canEdit
           ? `ondragover="onPtcCellDragOver(event)" ondragleave="onPtcCellDragLeave(event)" ondrop="onPtcCellDrop(event,'${ds}','${sr.key}')"`
           : '';
         if(names.length){
@@ -5000,6 +5000,8 @@ function onPtcCellDragLeave(ev){
 async function onPtcCellDrop(ev, date, shiftKey){
   ev.preventDefault();
   ev.currentTarget.classList.remove('ptc-drop-target');
+  // 權限防護:僅 admin 或可編輯該院區的主管能拖放 (與 onPartTimeSlotClick 一致)
+  if(typeof requireEditPermission === 'function' && !requireEditPermission()) return;
   const name = ev.dataTransfer.getData('text/plain');
   if(!name) return;
 
