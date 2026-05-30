@@ -4472,9 +4472,12 @@ function renderPositionBar(){
     bar.appendChild(btn);
   });
 
-  // 顯示/隱藏控制按鈕 (僅管理員可見)
-  const isAdmin = State.user && State.user.role === 'admin';
-  if(isAdmin){
+  // 顯示/隱藏控制按鈕 (管理員,或可編輯該院區的主管 — 讓主管也能開關職位 tab,例如減重櫃台)
+  const canManagePositions = State.user && (
+    State.user.role === 'admin' ||
+    (State.user.role === 'manager' && (typeof canEditCurrentBranch === 'function' ? canEditCurrentBranch() : false))
+  );
+  if(canManagePositions){
     const wrap = document.createElement('div');
     wrap.className = 'pos-vis-wrap';
     wrap.innerHTML = `
