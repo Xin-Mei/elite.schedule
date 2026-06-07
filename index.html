@@ -4472,12 +4472,9 @@ function renderPositionBar(){
     bar.appendChild(btn);
   });
 
-  // 顯示/隱藏控制按鈕 (管理員,或可編輯該院區的主管 — 讓主管也能開關職位 tab,例如減重櫃台)
-  const canManagePositions = State.user && (
-    State.user.role === 'admin' ||
-    (State.user.role === 'manager' && (typeof canEditCurrentBranch === 'function' ? canEditCurrentBranch() : false))
-  );
-  if(canManagePositions){
+  // 顯示/隱藏控制按鈕 (僅管理員可見)
+  const isAdmin = State.user && State.user.role === 'admin';
+  if(isAdmin){
     const wrap = document.createElement('div');
     wrap.className = 'pos-vis-wrap';
     wrap.innerHTML = `
@@ -4771,9 +4768,6 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   });
   const weekDayLabels = ['日','一','二','三','四','五','六'];
   const isAdmin = State.user.role === 'admin';
-  // 編輯權限:admin 全院區,manager 限可管理的院區 (與 onPartTimeSlotClick 的權限一致)
-  // 用於診助上班時間、批次填入、人員池新增/刪除等編輯入口的顯示判斷
-  const canEdit = (typeof canEditCurrentBranch === 'function') ? canEditCurrentBranch() : isAdmin;
   // 工讀人員池:admin / manager 看得到並可管理;員工看不到
   const canSeePartTimePool = State.user && (State.user.role === 'admin' || State.user.role === 'manager');
   const hoursTableHtml = `
@@ -4781,7 +4775,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <thead>
         <tr>
           <th colspan="7" style="text-align:left; padding:8px 14px; background:var(--teal-50); font-family:'Noto Serif TC',serif; font-size:15px; color:var(--teal-900); letter-spacing:2px;">
-            ⏰ 診助上班時間 ${canEdit ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
+            ⏰ 診助上班時間 ${isAdmin ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
           </th>
         </tr>
         <tr>
@@ -4791,8 +4785,8 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <tbody>
         <tr>
           ${weekHours.map((h, i) => {
-            const cls = canEdit ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
-            const onclick = canEdit ? `onclick="editPtcHours(${i})"` : '';
+            const cls = isAdmin ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
+            const onclick = isAdmin ? `onclick="editPtcHours(${i})"` : '';
             const r1 = h.r1 ? h.r1 : '<span class="ptc-hours-empty">—</span>';
             const r2 = h.r2 ? h.r2 : '<span class="ptc-hours-empty">—</span>';
             return `<td class="${cls}" ${onclick}>
@@ -4805,7 +4799,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </table>`;
 
   // ─── 批次填入工具列 (僅管理員) ───────────────────────────────────────
-  const bulkToolbarHtml = canEdit ? `
+  const bulkToolbarHtml = isAdmin ? `
     <div class="ptc-bulk-toolbar">
       <span class="ptc-bulk-info">⚡ 批次填入:</span>
       <button class="btn" onclick="openPtcBulkFill('weekday')">📅 依星期幾批次填</button>
@@ -4822,15 +4816,15 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
                ondragstart="onPtcStaffDragStart(event, '${n.replace(/'/g,"\\'")}')"
                ondragend="onPtcStaffDragEnd(event)">
            <span class="ptc-staff-name">${n}</span>
-           ${canEdit ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
+           ${isAdmin ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
          </span>`
       ).join('')
     : '<span style="color:var(--muted); font-size:13px;">尚未設定工讀人員</span>';
   const staffPoolHtml = canSeePartTimePool ? `
     <div class="ptc-staff-pool">
       <div class="ptc-staff-pool-head">
-        <span class="ptc-staff-pool-title">👥 工讀人員池 ${canEdit ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
-        ${canEdit ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
+        <span class="ptc-staff-pool-title">👥 工讀人員池 ${isAdmin ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
+        ${isAdmin ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
       </div>
       <div class="ptc-staff-chips">${staffChipsHtml}</div>
     </div>
@@ -4877,7 +4871,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
         }
         const cell = monthSched.shifts[ds] || {};
         const names = (cell[sr.key] || []).filter(n=>n);
-        const dragAttrs = canEdit
+        const dragAttrs = isAdmin
           ? `ondragover="onPtcCellDragOver(event)" ondragleave="onPtcCellDragLeave(event)" ondrop="onPtcCellDrop(event,'${ds}','${sr.key}')"`
           : '';
         if(names.length){
@@ -5000,8 +4994,6 @@ function onPtcCellDragLeave(ev){
 async function onPtcCellDrop(ev, date, shiftKey){
   ev.preventDefault();
   ev.currentTarget.classList.remove('ptc-drop-target');
-  // 權限防護:僅 admin 或可編輯該院區的主管能拖放 (與 onPartTimeSlotClick 一致)
-  if(typeof requireEditPermission === 'function' && !requireEditPermission()) return;
   const name = ev.dataTransfer.getData('text/plain');
   if(!name) return;
 
@@ -6248,6 +6240,50 @@ function confirmQuickSwapPick(targetName, targetGroup){
     }
   });
 
+  // ─── 兩班制:同日同人檢核 (新換進來的人若已在同日另一班 → 擋下) ────
+  // 快速換班是「單向」(沒有對方那邊的對調),只需檢查目標 cell 同日是否有同人
+  if(shouldCheckSameDayDuplicate(setting)){
+    // 算出當日另一班 (早↔晚) 是誰
+    const otherShift = (shift === '早') ? '晚' : (shift === '晚' ? '早' : null);
+    if(otherShift){
+      const otherSk = SHIFT_KEYS[otherShift];
+      // 套用既有 swap 後的有效 cell
+      let otherCell = (sched && sched.shifts && sched.shifts[date] && sched.shifts[date][otherSk]) || [];
+      // 套用既有 swap (排除剛刪掉的)
+      const swapsOnDay = (State.swaps || []).filter(s =>
+        s.branch === State.currentBranch && s.position === State.currentPosition &&
+        s.date === date && s.shift === otherShift && s.mode === 'swap'
+      );
+      swapsOnDay.forEach(s => {
+        const orig = s.originalName;
+        const nm = (s.swapWith || [])[0];
+        if(orig && nm){
+          otherCell = otherCell.map(n => n === orig ? nm : n);
+        }
+      });
+      if(otherCell.includes(targetName)){
+        showAlertModal(
+          `${date} ${targetName} 已經在當天另一班(${otherShift}班)上班,系統不允許同日早晚為同一人 (兩班制限制)`,
+          { icon: '⚠️', title: '換班規則檢查', duration: 5000 }
+        );
+        closeModal('quickSwapPickerModal');
+        // 把剛刪的舊 swap 復原 (因為前面已經刪了,但這次擋下,要還原)
+        [oldSwap, oldPaired].filter(Boolean).forEach(rec => {
+          if(!State.swaps.includes(rec)) State.swaps.push(rec);
+          const rid = String(rec.id || '');
+          if(!rid.startsWith('STMP') && State.pendingDeletions){
+            const di = State.pendingDeletions.indexOf(rec.id);
+            if(di >= 0) State.pendingDeletions.splice(di, 1);
+          }
+        });
+        renderBranch();
+        if(typeof updateUnsavedBanner === 'function') updateUnsavedBanner();
+        applyQuickSwapUI();
+        return;
+      }
+    }
+  }
+
   // 還原情境:使用者選的 target 就是 sheet 原排班員工 → 等於「取消換班」
   //   只刪除舊 swap (前面已處理) + 不再建立新 record,讓 cell 變回原色
   if(targetName === originalName){
@@ -7127,6 +7163,100 @@ function checkApplySwapDateRange(){
   }
 }
 
+// ─── 是否需要「同日同人」檢查 ───────────────────────────────────────
+// 只在「純兩班制(早+晚,每班 1 人,沒有午、沒有出勤)」啟用此檢查
+//   • 早午晚三班制(noon>0) → 同人同日多班 OK,不檢查
+//   • 出勤班(att>0) → 一天只有一格,不會有同日多班,不檢查
+//   • 早或晚單一(只有一班) → 不可能同日多班,不檢查
+function shouldCheckSameDayDuplicate(setting){
+  if(!setting || !setting.rules) return false;
+  const r = setting.rules;
+  const m = r.morningCount || 0;
+  const n = r.noonCount || 0;
+  const e = r.eveningCount || 0;
+  const a = r.attendanceCount || 0;
+  return m > 0 && e > 0 && n === 0 && a === 0;
+}
+
+// ─── 兩班制換班檢查:同一天的早班與晚班不可為同一人 ───────────
+// 適用情境:管理員 swap modal 雙向換班 / 快速換班
+// 參數:
+//   branch, position, date1, shift1, name1 — 本班 (要被換出去的人 + 他的班別)
+//   date2, shift2, name2 — 對方換班 (要被換進來的人 + 他的班別)
+// 回傳: {ok:true} 或 {ok:false, error:'...'}
+function validateSameDayDuplicate(branch, position, date1, shift1, name1, date2, shift2, name2){
+  const setting = ((State.settings || {})[branch] || {})[position];
+  if(!setting) return {ok:true};
+  const period = (setting.periods || []).find(p => {
+    if(!p.startDate) return false;
+    const sD = parseDate(p.startDate);
+    const eD = addDays(sD, 8*7-1);
+    const d = parseDate(date1);
+    return d >= sD && d <= eD;
+  });
+  if(!period) return {ok:true};
+  const sched = State.schedules[`${branch}__${position}__${period.startDate}`];
+  if(!sched || !sched.shifts) return {ok:true};
+
+  const SHIFT_LABEL_TO_KEY = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  // 計算當日「套用既有 swap 後」的有效 cell
+  const computeEff = (ds) => {
+    const raw = sched.shifts[ds] ? JSON.parse(JSON.stringify(sched.shifts[ds])) : {};
+    const SHIFT_KEYS = ['morning','noon','evening','attendance'];
+    const swapsOnDay = (State.swaps || []).filter(s =>
+      s.branch === branch && s.position === position &&
+      s.date === ds && s.mode === 'swap'
+    );
+    swapsOnDay.forEach(s => {
+      const orig = s.originalName;
+      const newName = (s.swapWith || [])[0];
+      if(!orig || !newName) return;
+      const sk = SHIFT_LABEL_TO_KEY[s.shift];
+      if(sk && raw[sk] && raw[sk].includes(orig)){
+        raw[sk] = raw[sk].map(n => n === orig ? newName : n);
+      }
+    });
+    return raw;
+  };
+
+  // 模擬本次換班:date1.shift1 的 name1 ↔ date2.shift2 的 name2
+  const sameDay = (date1 === date2);
+  const cell1 = computeEff(date1);
+  const cell2 = sameDay ? cell1 : computeEff(date2);
+  const sk1 = SHIFT_LABEL_TO_KEY[shift1];
+  const sk2 = SHIFT_LABEL_TO_KEY[shift2];
+  const removeFromAll = (cell, name) => {
+    Object.keys(cell).forEach(k => {
+      if(Array.isArray(cell[k])) cell[k] = cell[k].filter(n => n !== name);
+    });
+  };
+  // Step a: date1.shift1 — 移除 name1, 加入 name2
+  if(sk1 && cell1[sk1]){
+    removeFromAll(cell1, name1);
+    if(!cell1[sk1]) cell1[sk1] = [];
+    cell1[sk1].push(name2);
+  }
+  // Step b: date2.shift2 — 移除 name2, 加入 name1
+  if(sk2 && cell2[sk2]){
+    removeFromAll(cell2, name2);
+    if(!cell2[sk2]) cell2[sk2] = [];
+    cell2[sk2].push(name1);
+  }
+  // 檢查衝突:每個受影響的日期,早晚不可同人
+  const checkConflict = (cell, ds) => {
+    const morningSet = new Set((cell.morning || []).filter(Boolean));
+    const conflict = (cell.evening || []).filter(n => morningSet.has(n));
+    return conflict.length ? {ds, name: conflict[0]} : null;
+  };
+  const c1 = checkConflict(cell1, date1);
+  if(c1) return {ok:false, error:`${c1.ds} ${c1.name} 換班後同日早班與晚班為同一人,系統不允許 (兩班制限制)`};
+  if(!sameDay){
+    const c2 = checkConflict(cell2, date2);
+    if(c2) return {ok:false, error:`${c2.ds} ${c2.name} 換班後同日早班與晚班為同一人,系統不允許 (兩班制限制)`};
+  }
+  return {ok:true};
+}
+
 function validateSwapWorkHours(branch, position, date, applicantName, partnerName, targetDate){
   const branchSettings = (State.settings || {})[branch];
   if(!branchSettings || !branchSettings[position]){
@@ -7213,9 +7343,11 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
     };
   }
 
-  // ─── Step 5: 早/晚同人檢核 (僅限 櫃台/護理師/藥助) ────────────────
-  // 同一天的「早」與「晚」不可為同一人 (出勤 12HR 不在此限)
-  if(['櫃台','護理師','藥助'].includes(position) && targetDate){
+  // ─── Step 5: 早/晚同人檢核 ─────────────────────────────────────
+  // 同一天的「早」與「晚」不可為同一人 — 只在「兩班制(早+晚,每班 1 人,無午無出勤)」啟用
+  //   • 早午晚三班制(noon>0) → 同人同日多班 OK,不檢查
+  //   • 出勤班 → 一天只有一格,不檢查
+  if(shouldCheckSameDayDuplicate(setting) && targetDate){
     // 重要:cell 的「實際員工」要套用既有 swap (因為 sheet 中的原排班可能已被先前的換班蓋過)
     // 例:5/11 晚 sheet 中是「麗巧」,但被一筆 swap 換成「寶怡」,
     //   寶怡點 5/11 晚 cell 時看到自己的名字 → 申請與 5/15 晚換 →
@@ -8023,6 +8155,19 @@ async function submitSwap(){
         return;
       }
     }
+    // ─── 兩班制:同日同人檢核 ─────────────────────────────
+    // 換班後不可造成「同一天早班與晚班為同一人」
+    if(shouldCheckSameDayDuplicate(setting2)){
+      const checkRes = validateSameDayDuplicate(
+        State.currentBranch, State.currentPosition,
+        _swapCtx.date, _swapCtx.shift, _swapCtx.name,
+        partnerDate, partnerShift, w1
+      );
+      if(!checkRes.ok){
+        showAlertModal(checkRes.error, { icon: '⚠️', title: '換班規則檢查', duration: 5000 });
+        return;
+      }
+    }
     const recNoteSwap = ($('swapNote').value || '').trim();
     const baseTime = Date.now();
     const sharedCreatedAt = new Date().toISOString();
@@ -8195,16 +8340,6 @@ async function submitSwap(){
 }
 
 // ─── BATCH SAVE: flush all unsaved changes to Sheet ─────────────────────
-// 取得目前操作者標籤 (用於 _缺人紀錄 的 operator 欄,區分管理員/主管/員工)
-function getOperatorLabel(){
-  const u = State.user || {};
-  const name = String(u.name || u.account || u.employeeId || '').trim();
-  if(u.role === 'admin')   return name ? `${name} (管理員)` : '管理員';
-  if(u.role === 'manager') return name ? `${name} (主管)`   : '主管';
-  if(name) return name;   // 一般員工 — 直接記姓名
-  return '未知';
-}
-
 async function flushUnsavedChanges(){
   const unsaved = (State.swaps||[]).filter(s=>s._unsaved);
   const deletions = State.pendingDeletions || [];
@@ -8250,10 +8385,6 @@ async function flushUnsavedChanges(){
     delete cleanRec._unsaved;
     // Replace temp id with real one
     cleanRec.id = (rec.mode === 'leave' ? 'L' : 'S') + Date.now() + Math.floor(Math.random()*1000);
-    // 「缺人」紀錄:附上操作者身分 (寫入 _缺人紀錄 的 operator 欄)
-    if(rec.mode === 'leave' && String(rec.reason || '').trim() === '缺人'){
-      cleanRec.operator = getOperatorLabel();
-    }
     const apiAction = (rec.mode === 'leave') ? 'addLeave' : 'addSwap';
     const res = await api(apiAction, {record: cleanRec});
     if(!res.ok){
