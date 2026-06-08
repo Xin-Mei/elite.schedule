@@ -4601,6 +4601,42 @@ function getRulesForDate(setting, ds){
 // 回傳: [ {from:periodStart, rules}, {from:'2026-08-15', rules}, ... ]
 // 每個元素代表「從 from 日起套用此 rules」,直到下一個元素的 from 前一天
 // 至少回傳一個元素 (用 setting.rules 當預設,from=periodStart)
+// ─── 規則切換段:每段可有自己的員工名單/分組/起始位置 ──────────────────
+// 取得某日所屬的規則段 {from, rules, employees, isDefault}
+//   • 預設段 (切換日之前):rules=setting.rules, employees=setting.employees, isDefault=true
+//   • 切換段:rules=該切點 rules, employees=該切點自訂名單 (無則沿用主名單), isDefault=false
+function getActiveRuleSegment(setting, ds){
+  const def = { from:null, rules:(setting && setting.rules) || {}, employees:(setting && setting.employees) || [], isDefault:true };
+  if(!setting) return def;
+  const hist = (setting.rulesHistory || []).filter(h => h && h.from && h.rules).slice()
+                 .sort((a,b) => String(a.from).localeCompare(String(b.from)));
+  let active = def;
+  for(const h of hist){
+    if(h.from <= ds){
+      const emps = (Array.isArray(h.employees) && h.employees.length) ? h.employees : (setting.employees || []);
+      active = { from:h.from, rules:h.rules, employees:emps, isDefault:false };
+    } else break;
+  }
+  return active;
+}
+// 某日生效的員工名單 (該段的名單)
+function getEmployeesForDate(setting, ds){
+  return getActiveRuleSegment(setting, ds).employees || [];
+}
+// 某日在循環中的「基準位移」(加在 startIndex-1 上):
+//   • 預設段 → periodOffset + 距區間起始天數 (跨區間連續)
+//   • 切換段 → 距切換日天數 (從切換日當天重新起算第1天,不累積 periodOffset)
+function getCycleBaseForDate(setting, period, ds){
+  const startD = parseDate(period.startDate);
+  const seg = getActiveRuleSegment(setting, ds);
+  if(seg.isDefault){
+    const absIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+    const periodOffset = (absIdx >= 0 ? absIdx : 0) * (8*7);
+    return periodOffset + Math.round((parseDate(ds) - startD) / 86400000);
+  }
+  return Math.round((parseDate(ds) - parseDate(seg.from)) / 86400000);
+}
+
 function getRulesSegmentsInPeriod(setting, periodStart){
   const periodStartD = parseDate(periodStart);
   const periodEnd = addDays(periodStartD, 8*7-1);
@@ -4636,13 +4672,9 @@ function computeRuleSegments(setting, period){
   const sched = getScheduleForPeriod(period);
   const rawSegs = getRulesSegmentsInPeriod(setting, period.startDate);
 
-  const allValidNames = new Set(
-    (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
-  );
-  const absIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
-  const pOffset = (absIdx >= 0 ? absIdx : 0) * totalDays;
+  // 某日「現場計算」結果 (依該段 rules + 該段員工 + 循環基準) — 供 orphan fallback
   const computedCache = {};
-  const getComputed = (ds, dayDiff) => {
+  const getComputed = (ds) => {
     if(computedCache[ds]) return computedCache[ds];
     const result = {morning:[], noon:[], evening:[], attendance:[]};
     const dr = getRulesForDate(setting, ds);
@@ -4652,7 +4684,8 @@ function computeRuleSegments(setting, period){
     const dEve  = (dr && dr.eveningCount) || 0;
     const dAtt  = (dr && dr.attendanceCount) || 0;
     if(!dPat.length){ computedCache[ds] = result; return result; }
-    const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+    const dayEffEmps = getEffectiveEmployees(getEmployeesForDate(setting, ds), ds);
+    const cycBase = getCycleBaseForDate(setting, period, ds);
     const seen = new Set();
     const uniq = [];
     for(let i = dayEffEmps.length - 1; i >= 0; i--){
@@ -4664,7 +4697,7 @@ function computeRuleSegments(setting, period){
       uniq.unshift(emp);
     }
     uniq.forEach(emp => {
-      const cycPos = ((emp.startIndex - 1) + pOffset + dayDiff) % dPat.length;
+      const cycPos = ((emp.startIndex - 1) + cycBase) % dPat.length;
       const sym = dPat[cycPos];
       if(sym === '早'){ if(dMorn === 0 || result.morning.length < dMorn) result.morning.push(emp.name); }
       else if(sym === '午'){ if(dNoon === 0 || result.noon.length < dNoon) result.noon.push(emp.name); }
@@ -4675,24 +4708,26 @@ function computeRuleSegments(setting, period){
     return result;
   };
 
+  // 計算某組在 [iFrom,iTo) 內出勤格數 (依該日該段員工名單 + orphan fallback)
   const countGroup = (g, iFrom, iTo) => {
     let cnt = 0;
     for(let i = iFrom; i < iTo; i++){
       const ds = fmt(addDays(startD, i));
       const cell = (sched.shifts || {})[ds];
       if(!cell) continue;
-      const dayEmps = getEffectiveEmployees(setting.employees, ds);
-      const dayEmp = dayEmps.find(e => e.group === g);
+      const roster = getEffectiveEmployees(getEmployeesForDate(setting, ds), ds);
+      const dayEmp = roster.find(e => e.group === g);
       if(!dayEmp || !dayEmp.name) continue;
       const n = dayEmp.name;
+      const validNames = new Set(roster.map(e => e.name).filter(Boolean));
       ['morning','noon','evening','attendance'].forEach(sk => {
         const namesInCell = cell[sk] || [];
         if(!namesInCell.length) return;
         let hit = 0;
         namesInCell.forEach(cn => {
           if(cn === n){ hit++; return; }
-          if(allValidNames.has(cn)) return;
-          const computed = getComputed(ds, i);
+          if(validNames.has(cn)) return;
+          const computed = getComputed(ds);
           if((computed[sk] || []).includes(n)) hit++;
         });
         if(hit > 0) cnt += hit;
@@ -4700,9 +4735,6 @@ function computeRuleSegments(setting, period){
     }
     return cnt;
   };
-
-  const orderedGroups = [];
-  (setting.employees || []).forEach(e => { if(!orderedGroups.includes(e.group)) orderedGroups.push(e.group); });
 
   const segments = rawSegs.map((seg, si) => {
     const segFrom = (seg.from < period.startDate) ? period.startDate : seg.from;
@@ -4720,19 +4752,22 @@ function computeRuleSegments(setting, period){
     if((r.eveningCount || 0) > 0) parts.push('晚' + r.eveningCount);
     if(hasAtt) parts.push('出勤' + r.attendanceCount);
     const ruleDesc = parts.join(' ') || '—';
-    const segEndEmps = getEffectiveEmployees(setting.employees, segTo);
+    // 該段員工名單 (自訂或沿用主名單) — 決定要顯示哪些組
+    const segRoster = getEffectiveEmployees(getEmployeesForDate(setting, segTo), segTo);
+    const segOrdered = [];
+    segRoster.forEach(e => { if(e.group && !segOrdered.includes(e.group)) segOrdered.push(e.group); });
     const groups = [];
-    orderedGroups.forEach(g => {
+    segOrdered.forEach(g => {
       const cnt = countGroup(g, iFrom, iTo);
       if(cnt <= 0) return;
-      const emp = segEndEmps.find(e => e.group === g)
-                || (setting.employees || []).find(e => e.group === g)
-                || {group:g, name:''};
+      const emp = segRoster.find(e => e.group === g) || {group:g, name:''};
       groups.push({ group:g, name: emp.name || '', count: cnt });
     });
     return { from:segFrom, to:segTo, iFrom, iTo, rules:r, unitLabel, hasAtt, ruleDesc, groups };
   });
 
+  const orderedGroups = [];
+  (setting.employees || []).forEach(e => { if(!orderedGroups.includes(e.group)) orderedGroups.push(e.group); });
   return { multiSeg: segments.length > 1, segments, periodEndStr, orderedGroups };
 }
 
@@ -5546,11 +5581,11 @@ function renderSummary(setting, period){
   // 用 swap 紀錄找到「該日該員工屬於哪組」(考慮區間)
   const groupOfNameOnDate = (name, dateStr) => {
     if(!name) return null;
-    const dayEmps = getEffectiveEmployees(setting.employees, dateStr);
+    const dayEmps = getEffectiveEmployees(getEmployeesForDate(setting, dateStr), dateStr);
     const hit = dayEmps.find(e => e.name === name);
     if(hit) return hit.group;
-    // fallback:從全名單找(不分區間)
-    const hit2 = setting.employees.find(e => e.name === name);
+    // fallback:從該段名單找(不分區間)
+    const hit2 = (getEmployeesForDate(setting, dateStr) || []).find(e => e.name === name);
     return hit2 ? hit2.group : null;
   };
 
@@ -5858,7 +5893,7 @@ function renderScheduleTable(setting, period){
   const groupOfByDate = {}; // 'YYYY-MM-DD' → {name: group}
   function groupOfFor(dateStr){
     if(!groupOfByDate[dateStr]){
-      groupOfByDate[dateStr] = getGroupOfMap(setting.employees, dateStr);
+      groupOfByDate[dateStr] = getGroupOfMap(getEmployeesForDate(setting, dateStr), dateStr);
     }
     return groupOfByDate[dateStr];
   }
@@ -5890,7 +5925,7 @@ function renderScheduleTable(setting, period){
     const dt = parseDate(ds);
     const dayDiff = Math.floor((dt - startD) / 86400000);
     if(dayDiff < 0 || dayDiff >= 56) return result;
-    const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+    const dayEffEmps = getEffectiveEmployees(getEmployeesForDate(setting, ds), ds);
     const seenGroups = new Set();
     const uniqueByGroup = [];
     for(let i = dayEffEmps.length - 1; i >= 0; i--){
@@ -5902,7 +5937,7 @@ function renderScheduleTable(setting, period){
     }
     uniqueByGroup.forEach(emp => {
       if(emp.name === emp.group) return;
-      const cycPos = ((emp.startIndex - 1) + periodOffset + dayDiff) % dayPattern.length;
+      const cycPos = ((emp.startIndex - 1) + getCycleBaseForDate(setting, period, ds)) % dayPattern.length;
       const sym = dayPattern[cycPos];
       if(sym === '早'){
         if(dayMorn === 0 || result.morning.length < dayMorn) result.morning.push(emp.name);
@@ -6018,7 +6053,7 @@ function renderScheduleTable(setting, period){
         // 用「現場計算」(依循環+startIndex) 算出該 cell 該班別應該是誰,取代 orphan。
         // 有效員工 (在名單中) 保留不動。
         if(cell.length){
-          const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+          const dayEffEmps = getEffectiveEmployees(getEmployeesForDate(setting, ds), ds);
           const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
           // 預先算「現場計算」結果 (僅當有 orphan 時才用,避免每格都算)
           let _computedForFallback = null;
@@ -8941,13 +8976,15 @@ async function autoGenerate(){
       // 兩班制保險判斷也依該日 rules
       const _twoShiftMode = (dayMorn > 0 && dayEve > 0 && dayNoon === 0 && dayAtt === 0);
 
-      // ─── 依日期套用區間 (from/to) ────────────────────────────────
-      const dayEffEmps = getEffectiveEmployees(employees, ds);
+      // ─── 依日期套用「該段員工名單」(支援切換段各自名單,從切換日起算) ───
+      const segEmps = getEmployeesForDate(setting, ds);
+      const dayEffEmps = getEffectiveEmployees(segEmps, ds);
       const effSet = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
+      const _cycBase = getCycleBaseForDate(setting, period, ds);
 
-      employees.forEach(emp=>{
-        if(!effSet.has(emp.name)) return;
-        const cycPos = ((emp.startIndex - 1) + periodOffset + i) % dayPattern.length;
+      dayEffEmps.forEach(emp=>{
+        if(!emp.name) return;
+        const cycPos = ((emp.startIndex - 1) + _cycBase) % dayPattern.length;
         const sym = dayPattern[cycPos];
         if(sym==='早'){
           if(dayMorn === 0 || day.morning.length < dayMorn) day.morning.push(emp.name);
@@ -8971,10 +9008,10 @@ async function autoGenerate(){
         }
       });
 
-      if(morn>0 && day.morning.length !== morn) issues.push(`${ds} 早班 ${day.morning.length}/${morn}`);
-      if(noon>0 && day.noon.length !== noon) issues.push(`${ds} 午班 ${day.noon.length}/${noon}`);
-      if(eve>0 && day.evening.length !== eve) issues.push(`${ds} 晚班 ${day.evening.length}/${eve}`);
-      if(att>0 && day.attendance.length !== att) issues.push(`${ds} 出勤 ${day.attendance.length}/${att}`);
+      if(dayMorn>0 && day.morning.length !== dayMorn) issues.push(`${ds} 早班 ${day.morning.length}/${dayMorn}`);
+      if(dayNoon>0 && day.noon.length !== dayNoon) issues.push(`${ds} 午班 ${day.noon.length}/${dayNoon}`);
+      if(dayEve>0 && day.evening.length !== dayEve) issues.push(`${ds} 晚班 ${day.evening.length}/${dayEve}`);
+      if(dayAtt>0 && day.attendance.length !== dayAtt) issues.push(`${ds} 出勤 ${day.attendance.length}/${dayAtt}`);
 
       shifts[ds] = day;
     }
@@ -9339,6 +9376,7 @@ function renderRulesHistoryList(){
           <label style="color:var(--muted); font-size:11px;">循環 (用空格分隔,例:早 晚 休)</label>
           <input type="text" value="${pat}" placeholder="如:早 晚 休" onchange="updateRulesHistoryPattern(${idx}, this.value)" style="width:100%; font-size:13px;"/>
         </div>
+        ${renderRulesHistoryEmployees(idx, h, r)}
       </div>
     `;
   }).join('');
@@ -9359,7 +9397,8 @@ function addRulesHistoryEntry(){
   } else {
     defaultFrom = fmt(addDays(new Date(), 14));
   }
-  s.rulesHistory.push({ from: defaultFrom, rules: defaultRules });
+  const defaultEmployees = (s.employees || []).map(e => ({group:e.group, name:e.name, startIndex:e.startIndex||1}));
+  s.rulesHistory.push({ from: defaultFrom, rules: defaultRules, employees: defaultEmployees });
   sortRulesHistory(s);
   renderRulesHistoryList();
 }
@@ -9413,6 +9452,82 @@ function updateRulesHistoryPattern(idx, val){
 function sortRulesHistory(s){
   if(!s.rulesHistory) return;
   s.rulesHistory.sort((a,b) => String(a.from||'').localeCompare(String(b.from||'')));
+}
+
+// ─── 切換段員工名單編輯器 ────────────────────────────────────────────
+function renderRulesHistoryEmployees(idx, h, r){
+  const emps = Array.isArray(h.employees) ? h.employees : [];
+  const patLen = (r && Array.isArray(r.cyclePattern) ? r.cyclePattern.length : 0) || 1;
+  const groupOpts = ['A','B','C','D'];
+  const rows = emps.map((e, ei) => {
+    const gsel = groupOpts.map(g => `<option value="${g}" ${e.group===g?'selected':''}>${g}</option>`).join('');
+    const nm = String(e.name||'').replace(/"/g,'&quot;');
+    return `<div style="display:flex; align-items:center; gap:6px; margin-bottom:5px;">
+      <select onchange="updateRulesHistoryEmp(${idx},${ei},'group',this.value)" style="font-size:12px; padding:3px 4px;">${gsel}</select>
+      <input type="text" value="${nm}" placeholder="姓名" onchange="updateRulesHistoryEmp(${idx},${ei},'name',this.value)" style="flex:1; min-width:80px; font-size:13px; padding:3px 6px;"/>
+      <label style="color:var(--muted); font-size:11px; white-space:nowrap;">起始</label>
+      <input type="number" min="1" max="${patLen}" value="${e.startIndex||1}" onchange="updateRulesHistoryEmp(${idx},${ei},'startIndex',this.value)" style="width:52px; font-size:12px; padding:3px 4px;"/>
+      <button class="btn" type="button" onclick="removeRulesHistoryEmp(${idx},${ei})" title="移除此人" style="padding:2px 8px; background:#fde6e6; color:#a83838; font-size:12px;">✕</button>
+    </div>`;
+  }).join('');
+  const emptyHint = emps.length ? '' : '<div style="color:var(--muted); font-size:12px; padding:2px 0;">此切換段目前沿用主名單(未自訂)。按「複製主名單」開始編輯。</div>';
+  return `
+    <div style="border-top:1px dashed #d8d0bb; padding-top:8px; margin-top:2px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
+        <span style="font-weight:600; font-size:12px; color:var(--ink);">此段員工名單 / 分組 / 起始位置</span>
+        <button class="btn" type="button" onclick="copyMainRosterToRulesHistory(${idx})" style="margin-left:auto; padding:3px 9px; font-size:12px;">複製主名單</button>
+        <button class="btn" type="button" onclick="addRulesHistoryEmp(${idx})" style="padding:3px 9px; font-size:12px;">＋ 加人</button>
+      </div>
+      ${emptyHint}
+      ${rows}
+      <div style="color:var(--muted); font-size:11px; margin-top:4px;">起始位置 = 該員工在「切換日當天」的循環位置 (1 = 循環第 1 格);只影響切換日之後,不影響前段。</div>
+    </div>`;
+}
+
+function _rhSetting(){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  return s;
+}
+function updateRulesHistoryEmp(idx, eidx, field, val){
+  const s = _rhSetting();
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  if(!Array.isArray(s.rulesHistory[idx].employees)) s.rulesHistory[idx].employees = [];
+  const e = s.rulesHistory[idx].employees[eidx];
+  if(!e) return;
+  if(field === 'startIndex'){
+    let v = parseInt(val) || 1;
+    const patLen = ((s.rulesHistory[idx].rules && s.rulesHistory[idx].rules.cyclePattern) || []).length || 1;
+    if(v < 1) v = 1;
+    if(v > patLen) v = patLen;
+    e.startIndex = v;
+  } else {
+    e[field] = String(val);
+  }
+}
+function addRulesHistoryEmp(idx){
+  const s = _rhSetting();
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  if(!Array.isArray(s.rulesHistory[idx].employees)) s.rulesHistory[idx].employees = [];
+  const used = s.rulesHistory[idx].employees.map(e => e.group);
+  const g = ['A','B','C','D'].find(x => !used.includes(x)) || 'A';
+  s.rulesHistory[idx].employees.push({group:g, name:'', startIndex:1});
+  renderRulesHistoryList();
+}
+function removeRulesHistoryEmp(idx, eidx){
+  const s = _rhSetting();
+  if(!s.rulesHistory || !s.rulesHistory[idx] || !Array.isArray(s.rulesHistory[idx].employees)) return;
+  s.rulesHistory[idx].employees.splice(eidx, 1);
+  renderRulesHistoryList();
+}
+function copyMainRosterToRulesHistory(idx){
+  const s = _rhSetting();
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  s.rulesHistory[idx].employees = (s.employees || []).map(e => ({group:e.group, name:e.name, startIndex:e.startIndex||1}));
+  renderRulesHistoryList();
 }
 
 function addEmployee(){
@@ -10276,7 +10391,7 @@ async function downloadA4(){
   const a4GroupCache = {};
   function a4GroupOfFor(dateStr){
     if(!a4GroupCache[dateStr]){
-      a4GroupCache[dateStr] = getGroupOfMap(setting.employees, dateStr);
+      a4GroupCache[dateStr] = getGroupOfMap(getEmployeesForDate(setting, dateStr), dateStr);
     }
     return a4GroupCache[dateStr];
   }
@@ -10347,7 +10462,7 @@ async function downloadA4(){
         // 若 cell 中的姓名不在當前 employees 名單 (歷史殘留),
         // 用「現場計算」算出該 cell 該班別應該是誰,取代 orphan
         if(cell.length){
-          const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+          const dayEffEmps = getEffectiveEmployees(getEmployeesForDate(setting, ds), ds);
           const validNames = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
           // 現場計算結果 cache (僅 cell 中有 orphan 時才算)
           let _a4Computed = null;
@@ -10357,13 +10472,12 @@ async function downloadA4(){
               const result = {morning:[], noon:[], evening:[], attendance:[]};
               const dt = parseDate(ds);
               const dayDiff = Math.floor((dt - startD) / 86400000);
-              const _pattern = setting.rules.cyclePattern || [];
-              const _absPIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
-              const _pOffset = (_absPIdx >= 0 ? _absPIdx : 0) * 56;
-              const _morn = setting.rules.morningCount || 0;
-              const _noon = setting.rules.noonCount || 0;
-              const _eve  = setting.rules.eveningCount || 0;
-              const _att  = setting.rules.attendanceCount || 0;
+              const _a4drr = getRulesForDate(setting, ds);
+              const _pattern = (_a4drr && _a4drr.cyclePattern) || [];
+              const _morn = (_a4drr && _a4drr.morningCount) || 0;
+              const _noon = (_a4drr && _a4drr.noonCount) || 0;
+              const _eve  = (_a4drr && _a4drr.eveningCount) || 0;
+              const _att  = (_a4drr && _a4drr.attendanceCount) || 0;
               if(_pattern.length && dayDiff >= 0 && dayDiff < 56){
                 const _seen = new Set();
                 const _uniq = [];
@@ -10376,7 +10490,7 @@ async function downloadA4(){
                   _uniq.unshift(emp);
                 }
                 _uniq.forEach(emp => {
-                  const cycPos = ((emp.startIndex - 1) + _pOffset + dayDiff) % _pattern.length;
+                  const cycPos = ((emp.startIndex - 1) + getCycleBaseForDate(setting, period, ds)) % _pattern.length;
                   const sym = _pattern[cycPos];
                   if(sym === '早'){ if(_morn === 0 || result.morning.length < _morn) result.morning.push(emp.name); }
                   else if(sym === '午'){ if(_noon === 0 || result.noon.length < _noon) result.noon.push(emp.name); }
