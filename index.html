@@ -7473,10 +7473,10 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
       return conflict.length ? {ds, name: conflict[0]} : null;
     };
     const c1 = checkConflict(sourceCell, date);
-    if(c1) return {ok:false, error:`${c1.ds} ${c1.name} 換班後早班與晚班為同一人 (${position}不允許)`};
+    if(c1) return {ok:false, error:`${c1.ds} ${c1.name} 換班後同日早班與晚班為同一人,系統不允許 (兩班制限制)`};
     if(!sameDay){
       const c2 = checkConflict(targetCell, targetDate);
-      if(c2) return {ok:false, error:`${c2.ds} ${c2.name} 換班後早班與晚班為同一人 (${position}不允許)`};
+      if(c2) return {ok:false, error:`${c2.ds} ${c2.name} 換班後同日早班與晚班為同一人,系統不允許 (兩班制限制)`};
     }
   }
 
