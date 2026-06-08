@@ -5970,8 +5970,22 @@ function renderScheduleTable(setting, period){
     // 不能簡單做 startWeek + w (例:115 年 52 週 + 1 應該是 116 年 1 週,不是 53 週)
     const weekSunday = addDays(startD, w*7);
     const weekNum = getISOWeekOfYear(weekSunday);
+    // ── 該週生效班別 (子集) — 純段週只顯示該段班別,交接週才顯示聯集 ──
+    const _wKeys = new Set();
+    for(let _d=0; _d<7; _d++){
+      const _wr = getRulesForDate(setting, fmt(addDays(startD, w*7+_d)));
+      if(_wr){
+        if((_wr.morningCount||0)>0)    _wKeys.add('morning');
+        if((_wr.noonCount||0)>0)       _wKeys.add('noon');
+        if((_wr.eveningCount||0)>0)    _wKeys.add('evening');
+        if((_wr.attendanceCount||0)>0) _wKeys.add('attendance');
+      }
+    }
+    let wRows = shiftRows.filter(sr => _wKeys.has(sr.key));
+    if(!wRows.length) wRows = shiftRows;
+    const weekRowsPerWeek = 1 + wRows.length;
     // date row
-    html += `<tr class="date-row"><td class="week-cell" rowspan="${rowsPerWeek}" style="background:var(--teal-50); font-family:'Noto Serif TC',serif; color:var(--teal-800); font-weight:600; font-size:20px; vertical-align:middle; border-radius:12px 0 0 12px;">${weekNum}</td>`;
+    html += `<tr class="date-row"><td class="week-cell" rowspan="${weekRowsPerWeek}" style="background:var(--teal-50); font-family:'Noto Serif TC',serif; color:var(--teal-800); font-weight:600; font-size:20px; vertical-align:middle; border-radius:12px 0 0 12px;">${weekNum}</td>`;
     html += `<td>日期</td>`;
     for(let d=0; d<7; d++){
       const dt = addDays(startD, w*7+d);
@@ -5979,9 +5993,9 @@ function renderScheduleTable(setting, period){
     }
     html += `</tr>`;
 
-    // shift rows
-    shiftRows.forEach((sr, idx)=>{
-      const isLast = idx === shiftRows.length - 1;
+    // shift rows (該週子集)
+    wRows.forEach((sr, idx)=>{
+      const isLast = idx === wRows.length - 1;
       html += `<tr class="shift-row-${sr.label}${isLast?' shift-row-last':''}"><td>${sr.display || sr.label}</td>`;
       for(let d=0; d<7; d++){
         const dt = addDays(startD, w*7+d);
@@ -10295,10 +10309,24 @@ async function downloadA4(){
     ${WEEKDAY_LABELS.map(w=>`<th style="font-family:'Noto Serif TC',serif; font-weight:700; color:var(--teal-800); font-size:13px; padding:8px 4px; letter-spacing:2px;">${w}</th>`).join('')}
   </tr></thead><tbody>`;
   for(let w=0; w<8; w++){
-    html += `<tr class="date-row"><td class="week-cell" rowspan="${a4RowsPerWeek}" style="background:var(--teal-50); color:var(--teal-800); font-weight:700; font-family:'Noto Serif TC',serif; font-size:14px; vertical-align:middle; text-align:center; border-radius:8px 0 0 8px;">${startWeek+w}</td><td style="font-size:11px; color:var(--teal-900); font-weight:700; padding:6px 2px;">日期</td>`;
+    // 該週生效班別 (子集) — 與畫面一致
+    const _wKeys = new Set();
+    for(let _d=0; _d<7; _d++){
+      const _wr = getRulesForDate(setting, fmt(addDays(startD, w*7+_d)));
+      if(_wr){
+        if((_wr.morningCount||0)>0)    _wKeys.add('早');
+        if((_wr.noonCount||0)>0)       _wKeys.add('午');
+        if((_wr.attendanceCount||0)>0) _wKeys.add('出勤');
+        if((_wr.eveningCount||0)>0)    _wKeys.add('晚');
+      }
+    }
+    let wA4Shifts = a4Shifts.filter(x => _wKeys.has(x));
+    if(!wA4Shifts.length) wA4Shifts = a4Shifts;
+    const wA4RowsPerWeek = 1 + wA4Shifts.length;
+    html += `<tr class="date-row"><td class="week-cell" rowspan="${wA4RowsPerWeek}" style="background:var(--teal-50); color:var(--teal-800); font-weight:700; font-family:'Noto Serif TC',serif; font-size:14px; vertical-align:middle; text-align:center; border-radius:8px 0 0 8px;">${startWeek+w}</td><td style="font-size:11px; color:var(--teal-900); font-weight:700; padding:6px 2px;">日期</td>`;
     for(let d=0; d<7; d++){ html+=`<td style="font-size:11px; color:var(--teal-900); font-weight:700; padding:6px 2px; text-align:center;">${fmtMD(addDays(startD,w*7+d))}</td>`; }
     html += `</tr>`;
-    a4Shifts.forEach(shift=>{
+    wA4Shifts.forEach(shift=>{
       html += `<tr><td style="color:var(--muted); font-size:11px; text-align:center; padding:4px 2px;">${shift}</td>`;
       for(let d=0; d<7; d++){
         const ds = fmt(addDays(startD,w*7+d));
