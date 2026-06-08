@@ -516,6 +516,20 @@
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap:14px;
   }
+  .summary-seg-head{
+    grid-column:1 / -1;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-top:4px; padding:6px 4px 2px;
+    border-top:1px dashed var(--line);
+  }
+  .summary-seg-head:first-child{ border-top:none; margin-top:0; }
+  .summary-seg-head .seg-idx{
+    font-family:'Noto Serif TC',serif; font-weight:700; font-size:13px;
+    color:var(--teal-800); background:var(--teal-50);
+    border-radius:6px; padding:2px 10px; letter-spacing:1px;
+  }
+  .summary-seg-head .seg-range{ font-weight:600; font-size:14px; color:var(--ink); }
+  .summary-seg-head .seg-rule{ font-size:12px; color:var(--muted); letter-spacing:1px; }
   .summary-card{
     position:relative;
     padding:16px 20px;
@@ -4536,9 +4550,12 @@ function renderPositionBar(){
     bar.appendChild(btn);
   });
 
-  // 顯示/隱藏控制按鈕 (僅管理員可見)
-  const isAdmin = State.user && State.user.role === 'admin';
-  if(isAdmin){
+  // 顯示/隱藏控制按鈕 (管理員,或可編輯該院區的主管)
+  const canManagePositions = State.user && (
+    State.user.role === 'admin' ||
+    (State.user.role === 'manager' && (typeof canEditCurrentBranch === 'function' ? canEditCurrentBranch() : false))
+  );
+  if(canManagePositions){
     const wrap = document.createElement('div');
     wrap.className = 'pos-vis-wrap';
     wrap.innerHTML = `
@@ -4605,6 +4622,116 @@ function getRulesSegmentsInPeriod(setting, periodStart){
     }
   });
   return segs;
+}
+
+// ─── 規則分段統計工具 (畫面字卡 + A4 共用) ──────────────────────────
+// 依「該段排班規則」統計各組在該段日期區間內的出勤格數 (套用與畫面相同的 orphan fallback)
+// 回傳 { multiSeg, segments:[{from,to,iFrom,iTo,rules,unitLabel,hasAtt,ruleDesc,groups:[{group,name,count}]}], periodEndStr, orderedGroups }
+function computeRuleSegments(setting, period){
+  const startD = parseDate(period.startDate);
+  const totalDays = 8*7;
+  const periodEndStr = fmt(addDays(startD, totalDays-1));
+  const sched = getScheduleForPeriod(period);
+  const rawSegs = getRulesSegmentsInPeriod(setting, period.startDate);
+
+  const allValidNames = new Set(
+    (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
+  );
+  const absIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
+  const pOffset = (absIdx >= 0 ? absIdx : 0) * totalDays;
+  const computedCache = {};
+  const getComputed = (ds, dayDiff) => {
+    if(computedCache[ds]) return computedCache[ds];
+    const result = {morning:[], noon:[], evening:[], attendance:[]};
+    const dr = getRulesForDate(setting, ds);
+    const dPat = (dr && dr.cyclePattern) || [];
+    const dMorn = (dr && dr.morningCount) || 0;
+    const dNoon = (dr && dr.noonCount) || 0;
+    const dEve  = (dr && dr.eveningCount) || 0;
+    const dAtt  = (dr && dr.attendanceCount) || 0;
+    if(!dPat.length){ computedCache[ds] = result; return result; }
+    const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
+    const seen = new Set();
+    const uniq = [];
+    for(let i = dayEffEmps.length - 1; i >= 0; i--){
+      const emp = dayEffEmps[i];
+      if(!emp || !emp.group || !emp.name) continue;
+      if(emp.name === emp.group) continue;
+      if(seen.has(emp.group)) continue;
+      seen.add(emp.group);
+      uniq.unshift(emp);
+    }
+    uniq.forEach(emp => {
+      const cycPos = ((emp.startIndex - 1) + pOffset + dayDiff) % dPat.length;
+      const sym = dPat[cycPos];
+      if(sym === '早'){ if(dMorn === 0 || result.morning.length < dMorn) result.morning.push(emp.name); }
+      else if(sym === '午'){ if(dNoon === 0 || result.noon.length < dNoon) result.noon.push(emp.name); }
+      else if(sym === '晚'){ if(dEve === 0 || result.evening.length < dEve) result.evening.push(emp.name); }
+      else if(sym === '出勤'){ if(dAtt === 0 || result.attendance.length < dAtt) result.attendance.push(emp.name); }
+    });
+    computedCache[ds] = result;
+    return result;
+  };
+
+  const countGroup = (g, iFrom, iTo) => {
+    let cnt = 0;
+    for(let i = iFrom; i < iTo; i++){
+      const ds = fmt(addDays(startD, i));
+      const cell = (sched.shifts || {})[ds];
+      if(!cell) continue;
+      const dayEmps = getEffectiveEmployees(setting.employees, ds);
+      const dayEmp = dayEmps.find(e => e.group === g);
+      if(!dayEmp || !dayEmp.name) continue;
+      const n = dayEmp.name;
+      ['morning','noon','evening','attendance'].forEach(sk => {
+        const namesInCell = cell[sk] || [];
+        if(!namesInCell.length) return;
+        let hit = 0;
+        namesInCell.forEach(cn => {
+          if(cn === n){ hit++; return; }
+          if(allValidNames.has(cn)) return;
+          const computed = getComputed(ds, i);
+          if((computed[sk] || []).includes(n)) hit++;
+        });
+        if(hit > 0) cnt += hit;
+      });
+    }
+    return cnt;
+  };
+
+  const orderedGroups = [];
+  (setting.employees || []).forEach(e => { if(!orderedGroups.includes(e.group)) orderedGroups.push(e.group); });
+
+  const segments = rawSegs.map((seg, si) => {
+    const segFrom = (seg.from < period.startDate) ? period.startDate : seg.from;
+    const segTo = (si < rawSegs.length - 1)
+      ? fmt(addDays(parseDate(rawSegs[si+1].from), -1))
+      : periodEndStr;
+    const iFrom = Math.max(0, Math.round((parseDate(segFrom) - startD) / 86400000));
+    const iTo = Math.min(totalDays, Math.round((parseDate(segTo) - startD) / 86400000) + 1);
+    const r = seg.rules || {};
+    const hasAtt = (r.attendanceCount || 0) > 0;
+    const unitLabel = hasAtt ? '天' : '班';
+    const parts = [];
+    if((r.morningCount || 0) > 0) parts.push('早' + r.morningCount);
+    if((r.noonCount || 0) > 0) parts.push('午' + r.noonCount);
+    if((r.eveningCount || 0) > 0) parts.push('晚' + r.eveningCount);
+    if(hasAtt) parts.push('出勤' + r.attendanceCount);
+    const ruleDesc = parts.join(' ') || '—';
+    const segEndEmps = getEffectiveEmployees(setting.employees, segTo);
+    const groups = [];
+    orderedGroups.forEach(g => {
+      const cnt = countGroup(g, iFrom, iTo);
+      if(cnt <= 0) return;
+      const emp = segEndEmps.find(e => e.group === g)
+                || (setting.employees || []).find(e => e.group === g)
+                || {group:g, name:''};
+      groups.push({ group:g, name: emp.name || '', count: cnt });
+    });
+    return { from:segFrom, to:segTo, iFrom, iTo, rules:r, unitLabel, hasAtt, ruleDesc, groups };
+  });
+
+  return { multiSeg: segments.length > 1, segments, periodEndStr, orderedGroups };
 }
 
 function getCurrentSetting(){
@@ -4877,6 +5004,8 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   });
   const weekDayLabels = ['日','一','二','三','四','五','六'];
   const isAdmin = State.user.role === 'admin';
+  // 編輯權限:admin 全院區,manager 限可管理的院區 (與 onPartTimeSlotClick 一致)
+  const canEdit = (typeof canEditCurrentBranch === 'function') ? canEditCurrentBranch() : isAdmin;
   // 工讀人員池:admin / manager 看得到並可管理;員工看不到
   const canSeePartTimePool = State.user && (State.user.role === 'admin' || State.user.role === 'manager');
   const hoursTableHtml = `
@@ -4884,7 +5013,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <thead>
         <tr>
           <th colspan="7" style="text-align:left; padding:8px 14px; background:var(--teal-50); font-family:'Noto Serif TC',serif; font-size:15px; color:var(--teal-900); letter-spacing:2px;">
-            ⏰ 診助上班時間 ${isAdmin ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
+            ⏰ 診助上班時間 ${canEdit ? '<span style="font-size:11px; font-weight:400; color:var(--muted); letter-spacing:1px; margin-left:8px;">(點各格可編輯)</span>' : ''}
           </th>
         </tr>
         <tr>
@@ -4894,8 +5023,8 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
       <tbody>
         <tr>
           ${weekHours.map((h, i) => {
-            const cls = isAdmin ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
-            const onclick = isAdmin ? `onclick="editPtcHours(${i})"` : '';
+            const cls = canEdit ? 'ptc-hours-cell editable' : 'ptc-hours-cell';
+            const onclick = canEdit ? `onclick="editPtcHours(${i})"` : '';
             const r1 = h.r1 ? h.r1 : '<span class="ptc-hours-empty">—</span>';
             const r2 = h.r2 ? h.r2 : '<span class="ptc-hours-empty">—</span>';
             return `<td class="${cls}" ${onclick}>
@@ -4908,7 +5037,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
     </table>`;
 
   // ─── 批次填入工具列 (僅管理員) ───────────────────────────────────────
-  const bulkToolbarHtml = isAdmin ? `
+  const bulkToolbarHtml = canEdit ? `
     <div class="ptc-bulk-toolbar">
       <span class="ptc-bulk-info">⚡ 批次填入:</span>
       <button class="btn" onclick="openPtcBulkFill('weekday')">📅 依星期幾批次填</button>
@@ -4925,15 +5054,15 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
                ondragstart="onPtcStaffDragStart(event, '${n.replace(/'/g,"\\'")}')"
                ondragend="onPtcStaffDragEnd(event)">
            <span class="ptc-staff-name">${n}</span>
-           ${isAdmin ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
+           ${canEdit ? `<button class="ptc-staff-del" onclick="removePtcStaff('${n.replace(/'/g,"\\'")}')" title="刪除此人員">×</button>` : ''}
          </span>`
       ).join('')
     : '<span style="color:var(--muted); font-size:13px;">尚未設定工讀人員</span>';
   const staffPoolHtml = canSeePartTimePool ? `
     <div class="ptc-staff-pool">
       <div class="ptc-staff-pool-head">
-        <span class="ptc-staff-pool-title">👥 工讀人員池 ${isAdmin ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
-        ${isAdmin ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
+        <span class="ptc-staff-pool-title">👥 工讀人員池 ${canEdit ? '<span class="ptc-staff-pool-hint">(可拖曳到下方排班格)</span>' : ''}</span>
+        ${canEdit ? '<button class="btn primary" onclick="addPtcStaff()" style="padding:5px 12px; font-size:13px;">＋ 新增人員</button>' : ''}
       </div>
       <div class="ptc-staff-chips">${staffChipsHtml}</div>
     </div>
@@ -4980,7 +5109,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
         }
         const cell = monthSched.shifts[ds] || {};
         const names = (cell[sr.key] || []).filter(n=>n);
-        const dragAttrs = isAdmin
+        const dragAttrs = canEdit
           ? `ondragover="onPtcCellDragOver(event)" ondragleave="onPtcCellDragLeave(event)" ondrop="onPtcCellDrop(event,'${ds}','${sr.key}')"`
           : '';
         if(names.length){
@@ -5103,6 +5232,7 @@ function onPtcCellDragLeave(ev){
 async function onPtcCellDrop(ev, date, shiftKey){
   ev.preventDefault();
   ev.currentTarget.classList.remove('ptc-drop-target');
+  if(typeof requireEditPermission === 'function' && !requireEditPermission()) return;
   const name = ev.dataTransfer.getData('text/plain');
   if(!name) return;
 
@@ -5523,120 +5653,25 @@ function renderSummary(setting, period){
   const hasAttendance = (setting.rules && setting.rules.attendanceCount > 0);
   const unitLabel = hasAttendance ? '天' : '班';
 
-  orderedGroups.forEach(g=>{
-    // 字卡標題顯示「期末日」當下該組的有效員工 (若期間內換人,顯示最新者)
-    const periodEndStr = fmt(addDays(startD, totalDays-1));
-    const effectiveEmps = getEffectiveEmployees(setting.employees, periodEndStr);
-    const emp = effectiveEmps.find(e => e.group === g)
-                || setting.employees.find(e=>e.group===g)
-                || {group:g, name:''};
-    // 計算 baseWork:每天用「該日有效的此組員工」計入,支援區間切換
-    // 套用跟畫面渲染相同的 fallback:cell 中不在名單的姓名 (歷史殘留),
-    // 視為該班別現場計算的人。這樣字卡天數會跟畫面看到的人一致。
-    let baseWork = 0;
-    const _bwAllValidNames = new Set(
-      (setting.employees || []).filter(e => e.name && e.name !== e.group).map(e => e.name)
-    );
-    // computeShiftCell 在 renderScheduleTable 中定義,這裡需要重新算或共用
-    // 直接 inline 算:依當前 period 找絕對索引,套用 cyclePattern + startIndex
-    const _bwAbsIdx = (setting.periods || []).findIndex(p => p.startDate === period.startDate);
-    const _bwPOffset = (_bwAbsIdx >= 0 ? _bwAbsIdx : 0) * totalDays;
-    const _bwPattern = setting.rules.cyclePattern || [];
-    const _bwMorn = setting.rules.morningCount || 0;
-    const _bwNoon = setting.rules.noonCount || 0;
-    const _bwEve  = setting.rules.eveningCount || 0;
-    const _bwAtt  = setting.rules.attendanceCount || 0;
-    // helper:對某天某班別,算現場計算結果 (套用 fallback 用) — 支援 rulesHistory
-    const _bwComputedCache = {};
-    const _bwGetComputed = (ds, dayDiff) => {
-      if(_bwComputedCache[ds]) return _bwComputedCache[ds];
-      const result = {morning:[], noon:[], evening:[], attendance:[]};
-      // 取該日有效 rules
-      const dr = getRulesForDate(setting, ds);
-      const dPat = (dr && dr.cyclePattern) || _bwPattern;
-      const dMorn = (dr && dr.morningCount) || 0;
-      const dNoon = (dr && dr.noonCount) || 0;
-      const dEve  = (dr && dr.eveningCount) || 0;
-      const dAtt  = (dr && dr.attendanceCount) || 0;
-      if(!dPat.length){ _bwComputedCache[ds] = result; return result; }
-      const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-      const _seen = new Set();
-      const _uniq = [];
-      for(let i = dayEffEmps.length - 1; i >= 0; i--){
-        const emp = dayEffEmps[i];
-        if(!emp || !emp.group || !emp.name) continue;
-        if(emp.name === emp.group) continue;
-        if(_seen.has(emp.group)) continue;
-        _seen.add(emp.group);
-        _uniq.unshift(emp);
-      }
-      _uniq.forEach(emp => {
-        const cycPos = ((emp.startIndex - 1) + _bwPOffset + dayDiff) % dPat.length;
-        const sym = dPat[cycPos];
-        if(sym === '早'){ if(dMorn === 0 || result.morning.length < dMorn) result.morning.push(emp.name); }
-        else if(sym === '午'){ if(dNoon === 0 || result.noon.length < dNoon) result.noon.push(emp.name); }
-        else if(sym === '晚'){ if(dEve === 0 || result.evening.length < dEve) result.evening.push(emp.name); }
-        else if(sym === '出勤'){ if(dAtt === 0 || result.attendance.length < dAtt) result.attendance.push(emp.name); }
-      });
-      _bwComputedCache[ds] = result;
-      return result;
-    };
-    for(let i=0;i<totalDays;i++){
-      const ds = fmt(addDays(startD,i));
-      const cell = (sched.shifts||{})[ds];
-      if(!cell) continue;
-      // 找該日該組的有效員工
-      const dayEmps = getEffectiveEmployees(setting.employees, ds);
-      const dayEmp = dayEmps.find(e => e.group === g);
-      if(!dayEmp || !dayEmp.name) continue;
-      const n = dayEmp.name;
-      // 每個班別:檢查 cell 中是否包含該員工 (套用 fallback)
-      ['morning','noon','evening','attendance'].forEach(sk => {
-        const namesInCell = cell[sk] || [];
-        if(!namesInCell.length) return;
-        // 套用同樣的 fallback 邏輯:不在名單的姓名 → 用現場計算結果取代
-        let hitCount = 0;
-        namesInCell.forEach(cn => {
-          if(cn === n){
-            hitCount++;
-            return;
-          }
-          if(_bwAllValidNames.has(cn)) return;   // 在名單但不是本員工 → skip
-          // 不在名單 (orphan) → 用現場計算結果取代
-          const computed = _bwGetComputed(ds, i);
-          const computedForShift = computed[sk] || [];
-          if(computedForShift.includes(n)){
-            hitCount++;
-          }
-        });
-        if(hitCount > 0) baseWork += hitCount;
-      });
-    }
-    // adj 改讀 group level 累積值 (整組 leaveDays / swapNetWorkDelta),
-    // 才能在「期間中換人」時依然正確顯示 (因為 swap 紀錄可能屬於該組的舊員工)
-    const adj = (offAdjByGroup[g]) || {leaveDays:0, swapNetWorkDelta:0};
+  const _ruleSeg = computeRuleSegments(setting, period);
+  const _periodEndStr = fmt(addDays(startD, totalDays-1));
 
-    // 字卡顯示語意:上班日 (出勤格數)
-    //   1 個格子 = 1 個上班日
-    //   ❶ 換班 (mode=swap) → 一律顯示原始排班上班日,不調整數字
-    //   ❷ 私事支援/假別 → 表示該員少上班了,顯示為 "27 -N 天" (紅徽章)
+  // 整期 baseWork per group (= 各段加總),供換班工時警示與單一規則卡使用
+  const wholeBaseByGroup = {};
+  orderedGroups.forEach(g => { wholeBaseByGroup[g] = 0; });
+  _ruleSeg.segments.forEach(seg => seg.groups.forEach(gr => {
+    wholeBaseByGroup[gr.group] = (wholeBaseByGroup[gr.group] || 0) + gr.count;
+  }));
+
+  // 換班造成的工時變動警示 + 全院區總和 (整期,語意不變)
+  orderedGroups.forEach(g => {
+    const adj = offAdjByGroup[g] || {leaveDays:0, swapNetWorkDelta:0};
     totalWorkDelta += adj.swapNetWorkDelta;
-
-    const card = document.createElement('div');
-    card.className = 'summary-card '+g + (emp.name?'':' empty-slot');
-
-    let daysHtml;
-    if(emp.name){
-      if(adj.leaveDays > 0){
-        // 假別/支援 → 上班日減少 "27 -N 天"
-        // 加 onclick — 點擊查看該組所有相關明細(僅 admin/manager 才有 cursor:pointer 樣式)
-        daysHtml = `<span class="days">${baseWork}</span><span class="leave-add" onclick="showOffDetails('${g}', 'leave', event)" title="點擊查看明細">−${adj.leaveDays}</span>`;
-      } else {
-        daysHtml = `<span class="days">${baseWork}</span>`;
-      }
-      // 換班造成此員工實際上班變動時,個別警示
-      if(adj.swapNetWorkDelta !== 0){
-        // swapNetWorkDelta > 0 → 上班數增加 / < 0 → 上班數減少
+    if(adj.swapNetWorkDelta !== 0){
+      const emp = getEffectiveEmployees(setting.employees, _periodEndStr).find(e=>e.group===g)
+                || setting.employees.find(e=>e.group===g) || {group:g, name:''};
+      if(emp.name){
+        const baseWork = wholeBaseByGroup[g] || 0;
         const realWork = baseWork + adj.swapNetWorkDelta;
         const sign = (adj.swapNetWorkDelta > 0) ? '+' : '−';
         const absDelta = Math.abs(adj.swapNetWorkDelta);
@@ -5645,21 +5680,76 @@ function renderSummary(setting, period){
           `⚠️ ${emp.name} 因換班,實際上班${unit2}數為 ${realWork} ${unit2} (原排班 ${baseWork} ${unit2},${sign}${absDelta} ${unit2}),請確認是否符合工時規定`
         );
       }
-    } else {
-      daysHtml = `<span class="days">—</span>`;
     }
-
-    card.innerHTML = `
-      <div class="lbl">${g} 上班${unitLabel === '班' ? '班數' : '日'}</div>
-      <div class="val">
-        <span class="emp-name">${emp.name || '<span style="color:#bbaa88; font-style:italic; font-weight:400;">未設定</span>'}</span>
-        ${daysHtml}
-        <span class="lbl day-unit">${unitLabel}</span>
-      </div>
-      ${emp.name ? '' : '<div class="meta">點「院區設定」加入員工</div>'}
-    `;
-    row.appendChild(card);
   });
+
+  if(!_ruleSeg.multiSeg){
+    // ── 單一排班規則 — 維持原本每組一張卡 (含未設定組別) ──
+    orderedGroups.forEach(g => {
+      const emp = getEffectiveEmployees(setting.employees, _periodEndStr).find(e=>e.group===g)
+                || setting.employees.find(e=>e.group===g) || {group:g, name:''};
+      const baseWork = wholeBaseByGroup[g] || 0;
+      const adj = offAdjByGroup[g] || {leaveDays:0, swapNetWorkDelta:0};
+      const card = document.createElement('div');
+      card.className = 'summary-card ' + g + (emp.name ? '' : ' empty-slot');
+      let daysHtml;
+      if(emp.name){
+        daysHtml = (adj.leaveDays > 0)
+          ? `<span class="days">${baseWork}</span><span class="leave-add" onclick="showOffDetails('${g}', 'leave', event)" title="點擊查看明細">−${adj.leaveDays}</span>`
+          : `<span class="days">${baseWork}</span>`;
+      } else {
+        daysHtml = `<span class="days">—</span>`;
+      }
+      card.innerHTML = `
+        <div class="lbl">${g} 上班${unitLabel === '班' ? '班數' : '日'}</div>
+        <div class="val">
+          <span class="emp-name">${emp.name || '<span style="color:#bbaa88; font-style:italic; font-weight:400;">未設定</span>'}</span>
+          ${daysHtml}
+          <span class="lbl day-unit">${unitLabel}</span>
+        </div>
+        ${emp.name ? '' : '<div class="meta">點「院區設定」加入員工</div>'}
+      `;
+      row.appendChild(card);
+    });
+  } else {
+    // ── 期間中切換排班規則 — 依規則段分段顯示字卡 ──
+    _ruleSeg.segments.forEach((seg, si) => {
+      const fromD = parseDate(seg.from), toD = parseDate(seg.to);
+      const rangeLabel = `${tw(fromD.getFullYear())}/${fromD.getMonth()+1}/${fromD.getDate()} – ${tw(toD.getFullYear())}/${toD.getMonth()+1}/${toD.getDate()}`;
+      const head = document.createElement('div');
+      head.className = 'summary-seg-head';
+      head.innerHTML = `<span class="seg-idx">規則 ${si+1}</span><span class="seg-range">${rangeLabel}</span><span class="seg-rule">${seg.ruleDesc}・單位「${seg.unitLabel}」</span>`;
+      row.appendChild(head);
+      if(!seg.groups.length){
+        const none = document.createElement('div');
+        none.className = 'summary-card empty-slot';
+        none.style.gridColumn = '1 / -1';
+        none.innerHTML = `<div class="meta">此區間尚無排班資料</div>`;
+        row.appendChild(none);
+        return;
+      }
+      seg.groups.forEach(gr => {
+        const adj = offAdjByGroup[gr.group] || {leaveDays:0, swapNetWorkDelta:0};
+        // −N 維持整期合計 → 僅顯示在該組「最後出現的規則段」
+        const laterHas = _ruleSeg.segments.slice(si+1).some(s2 => s2.groups.some(x => x.group === gr.group));
+        const showLeave = (adj.leaveDays > 0) && !laterHas;
+        const card = document.createElement('div');
+        card.className = 'summary-card ' + gr.group;
+        const daysHtml = showLeave
+          ? `<span class="days">${gr.count}</span><span class="leave-add" onclick="showOffDetails('${gr.group}', 'leave', event)" title="整期合計,點擊查看明細">−${adj.leaveDays}</span>`
+          : `<span class="days">${gr.count}</span>`;
+        card.innerHTML = `
+          <div class="lbl">${gr.group} 上班${seg.unitLabel === '班' ? '班數' : '日'}</div>
+          <div class="val">
+            <span class="emp-name">${gr.name || gr.group}</span>
+            ${daysHtml}
+            <span class="lbl day-unit">${seg.unitLabel}</span>
+          </div>
+        `;
+        row.appendChild(card);
+      });
+    });
+  }
 
   // 全院區工時總和檢核 (額外保險):
   if(totalWorkDelta !== 0){
@@ -8489,6 +8579,16 @@ async function submitSwap(){
 }
 
 // ─── BATCH SAVE: flush all unsaved changes to Sheet ─────────────────────
+// 取得目前操作者標籤 (用於 _缺人紀錄 的 operator 欄,區分管理員/主管/員工)
+function getOperatorLabel(){
+  const u = State.user || {};
+  const name = String(u.name || u.account || u.employeeId || '').trim();
+  if(u.role === 'admin')   return name ? `${name} (管理員)` : '管理員';
+  if(u.role === 'manager') return name ? `${name} (主管)`   : '主管';
+  if(name) return name;
+  return '未知';
+}
+
 async function flushUnsavedChanges(){
   const unsaved = (State.swaps||[]).filter(s=>s._unsaved);
   const deletions = State.pendingDeletions || [];
@@ -8557,6 +8657,10 @@ async function flushUnsavedChanges(){
     delete cleanRec._unsaved;
     // Replace temp id with real one
     cleanRec.id = (rec.mode === 'leave' ? 'L' : 'S') + Date.now() + Math.floor(Math.random()*1000);
+    // 「缺人」紀錄:附上操作者身分 (寫入 _缺人紀錄 的 operator 欄)
+    if(rec.mode === 'leave' && String(rec.reason || '').trim() === '缺人'){
+      cleanRec.operator = getOperatorLabel();
+    }
     const apiAction = (rec.mode === 'leave') ? 'addLeave' : 'addSwap';
     const res = await api(apiAction, {record: cleanRec});
     if(!res.ok){
@@ -10035,23 +10139,8 @@ async function downloadA4(){
     }
   });
 
-  // Calculate base off counts
-  // baseWork = 上班天數 (出勤格數)
-  const baseWork = {};
-  setting.employees.forEach(e=>{
-    if(!e.name) return;
-    let work = 0;
-    for(let i=0;i<totalDays;i++){
-      const ds = fmt(addDays(startD,i));
-      const cell = (sched.shifts||{})[ds];
-      if(!cell) continue;
-      if((cell.morning||[]).includes(e.name)) work++;
-      if((cell.noon||[]).includes(e.name)) work++;
-      if((cell.evening||[]).includes(e.name)) work++;
-      if((cell.attendance||[]).includes(e.name)) work++;
-    }
-    baseWork[e.name] = work;
-  });
+  // 規則分段資料 (期間中切換排班規則時,字卡依段統計) — 與畫面字卡共用
+  const _a4Seg = computeRuleSegments(setting, period);
 
   const printArea = $('printArea');
   // 字卡顯示規則:上班日 (出勤格數)
@@ -10072,24 +10161,50 @@ async function downloadA4(){
   const a4UnitLabel = a4HasAttendance ? '天' : '班';
   const a4HeaderLabel = a4HasAttendance ? '上班日' : '上班班數';
 
-  const summaryCardsHtml = setting.employees.filter(e=>e.name).map(e=>{
-    const adj = adjustments[e.name] || {leaveDays:0, swapNetWorkDelta:0};
-    const work = baseWork[e.name] || 0;
-    const adjHtml = (adj.leaveDays > 0)
-      ? `<span style="background:#fde6e6; color:#a83838; font-size:${a4CardCompact?11:13}px; font-weight:700; padding:2px 6px; border-radius:5px; margin-left:4px;">−${adj.leaveDays}</span>`
+  const _a4Card = (group, name, count, unit, leaveDays) => {
+    const adjHtml = (leaveDays > 0)
+      ? `<span style="background:#fde6e6; color:#a83838; font-size:${a4CardCompact?11:13}px; font-weight:700; padding:2px 6px; border-radius:5px; margin-left:4px;">−${leaveDays}</span>`
       : '';
+    const hdr = unit === '天' ? '上班日' : '上班班數';
     return `
-      <div style="flex:1; min-width:${a4CardMinW}px; background:var(--${e.group}-bg); padding:${a4CardPadding}; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
-        <div style="font-size:${a4CardCompact?10:11}px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">${e.group} ${a4HeaderLabel}</div>
+      <div style="flex:0 1 ${a4CardMinW}px; min-width:${a4CardMinW}px; background:var(--${group}-bg); padding:${a4CardPadding}; border-radius:12px; border:1px solid rgba(0,0,0,0.05);">
+        <div style="font-size:${a4CardCompact?10:11}px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">${group} ${hdr}</div>
         <div style="display:flex; align-items:baseline; gap:5px; flex-wrap:wrap;">
-          <span style="font-family:'Noto Serif TC',serif; font-size:${a4NameSize}px; font-weight:600; color:var(--teal-900);">${e.name}</span>
-          <span style="font-family:'Noto Sans TC',sans-serif; font-size:${a4DaysSize}px; font-weight:700; color:var(--${e.group}-fg);">${work}</span>
+          <span style="font-family:'Noto Serif TC',serif; font-size:${a4NameSize}px; font-weight:600; color:var(--teal-900);">${name || group}</span>
+          <span style="font-family:'Noto Sans TC',sans-serif; font-size:${a4DaysSize}px; font-weight:700; color:var(--${group}-fg);">${count}</span>
           ${adjHtml}
-          <span style="font-size:${a4CardCompact?10:12}px; color:var(--muted);">${a4UnitLabel}</span>
+          <span style="font-size:${a4CardCompact?10:12}px; color:var(--muted);">${unit}</span>
         </div>
-      </div>
-    `;
-  }).join('');
+      </div>`;
+  };
+  let summaryCardsHtml;
+  if(!_a4Seg.multiSeg){
+    const seg = _a4Seg.segments[0] || {groups:[], unitLabel:a4UnitLabel};
+    summaryCardsHtml = seg.groups.map(gr => {
+      const adj = adjustments[gr.name] || {leaveDays:0};
+      return _a4Card(gr.group, gr.name, gr.count, seg.unitLabel, adj.leaveDays || 0);
+    }).join('');
+  } else {
+    summaryCardsHtml = _a4Seg.segments.map((seg, si) => {
+      const fromD = parseDate(seg.from), toD = parseDate(seg.to);
+      const rangeLabel = `${tw(fromD.getFullYear())}/${fromD.getMonth()+1}/${fromD.getDate()} – ${tw(toD.getFullYear())}/${toD.getMonth()+1}/${toD.getDate()}`;
+      const headHtml = `
+        <div style="flex-basis:100%; width:100%; display:flex; align-items:center; gap:8px; margin:${si>0?'10px':'0'} 0 2px; padding-top:${si>0?'6px':'0'}; ${si>0?'border-top:1px dashed var(--line);':''}">
+          <span style="font-family:'Noto Serif TC',serif; font-weight:700; font-size:12px; color:var(--teal-800); background:var(--teal-50); border-radius:5px; padding:2px 8px;">規則 ${si+1}</span>
+          <span style="font-weight:600; font-size:12px; color:var(--ink);">${rangeLabel}</span>
+          <span style="font-size:11px; color:var(--muted);">${seg.ruleDesc}・「${seg.unitLabel}」</span>
+        </div>`;
+      const cards = seg.groups.length
+        ? seg.groups.map(gr => {
+            const adj = adjustments[gr.name] || {leaveDays:0};
+            const laterHas = _a4Seg.segments.slice(si+1).some(s2 => s2.groups.some(x => x.group === gr.group));
+            const showLeave = ((adj.leaveDays||0) > 0) && !laterHas;
+            return _a4Card(gr.group, gr.name, gr.count, seg.unitLabel, showLeave ? adj.leaveDays : 0);
+          }).join('')
+        : `<div style="flex-basis:100%; color:var(--muted); font-size:11px;">此區間尚無排班</div>`;
+      return headHtml + cards;
+    }).join('');
+  }
 
   // 跨年支援:標題顯示「115年 52~116年 7 週」(同年則為「115年 20~27 週」)
   const periodEndDate = addDays(startD, 8*7-1);
@@ -10115,7 +10230,7 @@ async function downloadA4(){
     </div>
 
     <!-- Employee summary cards -->
-    <div style="display:flex; gap:8px; flex-wrap:nowrap; margin-bottom:18px;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
       ${summaryCardsHtml}
       <div style="flex:1; min-width:${a4CardMinW}px; background:var(--teal-50); padding:${a4CardPadding}; border-radius:12px;">
         <div style="font-size:${a4CardCompact?10:11}px; letter-spacing:2px; color:var(--muted); margin-bottom:4px;">排班起始</div>
@@ -10146,9 +10261,19 @@ async function downloadA4(){
     if(!swapMap[k] || swapMap[k].createdAt < s.createdAt) swapMap[k] = s;
   });
 
-  const a4HasNoon = (setting.rules.noonCount || 0) > 0;
-  const a4HasAtt  = (setting.rules.attendanceCount || 0) > 0;
-  const a4Shifts = a4HasAtt ? ['出勤'] : (a4HasNoon ? ['早','午','晚'] : ['早','晚']);
+  // 班別 row 取整段區間所有規則的聯集 (與畫面 renderScheduleTable 一致)
+  let _a4M=false,_a4N=false,_a4E=false,_a4A=false;
+  (_a4Seg.segments||[]).forEach(sg => { const r=sg.rules||{};
+    if((r.morningCount||0)>0)_a4M=true; if((r.noonCount||0)>0)_a4N=true;
+    if((r.eveningCount||0)>0)_a4E=true; if((r.attendanceCount||0)>0)_a4A=true; });
+  const a4HasNoon = _a4N;
+  const a4HasAtt  = _a4A;
+  let a4Shifts = [];
+  if(_a4M) a4Shifts.push('早');
+  if(_a4N) a4Shifts.push('午');
+  if(_a4A) a4Shifts.push('出勤');
+  if(_a4E) a4Shifts.push('晚');
+  if(!a4Shifts.length) a4Shifts = ['早','晚'];
   const a4RowsPerWeek = 1 + a4Shifts.length;
 
   let html = `<table class="schedule" style="font-size:11px; width:100%; border-collapse:collapse;"><thead><tr>
