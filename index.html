@@ -2702,6 +2702,15 @@
           例:循環是「早早晚晚休休」,小明設為 <b>3</b>,則第 1 天他上晚班、第 2 天晚班、第 3 天休假...
         </div>
         <div id="employeeStartList"></div>
+
+        <div class="section-h">規則切換日 <span style="font-weight:400; color:var(--muted); font-size:13px;">(進階,可選)</span></div>
+        <div class="section-desc">
+          若該職位在某日起需切換排班規則 (例如:8/15 起從「每日出勤」改為「早晚兩班制」),可在此新增切換日。<br>
+          切換日當天起,排班與字卡會依新規則計算;切換日之前仍維持上方主規則。<br>
+          ⚠️ 切換日只能在當前 8 週區間中段,且不可早於區間起始日。
+        </div>
+        <div id="rulesHistoryList" style="margin-bottom:8px;"></div>
+        <button class="btn" type="button" onclick="addRulesHistoryEntry()">＋ 新增規則切換日</button>
       </div>
 
       <div id="setupPartTimeNote" style="display:none;">
@@ -4553,6 +4562,51 @@ function renderPositionBar(){
 /* =====================================================================
    BRANCH-LEVEL RENDER (with auto-init defaults)
    ===================================================================== */
+// ─── 取得指定日期的有效 rules ──────────────────────────────────────
+// rulesHistory:[{from:'YYYY-MM-DD', rules:{...}}] 表示「從 from 起套用 rules」
+// 找出 from <= ds 的最後一筆;若沒有則回 setting.rules (預設)
+function getRulesForDate(setting, ds){
+  if(!setting) return null;
+  const hist = setting.rulesHistory || [];
+  if(!hist.length) return setting.rules;
+  // hist 已按 from 排序
+  let active = setting.rules;
+  for(const h of hist){
+    if(h && h.from && h.from <= ds) active = h.rules;
+    else break;
+  }
+  return active;
+}
+
+// ─── 取得當前 8 週區間中的「規則切點」陣列 ─────────────────────────
+// 回傳: [ {from:periodStart, rules}, {from:'2026-08-15', rules}, ... ]
+// 每個元素代表「從 from 日起套用此 rules」,直到下一個元素的 from 前一天
+// 至少回傳一個元素 (用 setting.rules 當預設,from=periodStart)
+function getRulesSegmentsInPeriod(setting, periodStart){
+  const periodStartD = parseDate(periodStart);
+  const periodEnd = addDays(periodStartD, 8*7-1);
+  const periodEndStr = fmt(periodEnd);
+  const segs = [];
+  // 找出在這 8 週區間「之前 或 區間內」的所有規則切點
+  // 先加最早的「預設」段 (from = periodStart 或之前最後一筆切點的 from)
+  const hist = (setting.rulesHistory || []).filter(h => h && h.from && h.rules);
+  hist.sort((a,b) => a.from.localeCompare(b.from));
+  // 在 periodStart 前生效的最後一筆規則 (含預設) — 當第一段
+  let curRules = setting.rules;
+  for(const h of hist){
+    if(h.from <= periodStart) curRules = h.rules;
+    else break;
+  }
+  segs.push({ from: periodStart, rules: curRules });
+  // 區間內的切點 (from > periodStart && from <= periodEnd)
+  hist.forEach(h => {
+    if(h.from > periodStart && h.from <= periodEndStr){
+      segs.push({ from: h.from, rules: h.rules });
+    }
+  });
+  return segs;
+}
+
 function getCurrentSetting(){
   const b = State.currentBranch, p = State.currentPosition;
   if(!State.settings[b]) State.settings[b] = {};
@@ -5492,12 +5546,19 @@ function renderSummary(setting, period){
     const _bwNoon = setting.rules.noonCount || 0;
     const _bwEve  = setting.rules.eveningCount || 0;
     const _bwAtt  = setting.rules.attendanceCount || 0;
-    // helper:對某天某班別,算現場計算結果 (套用 fallback 用)
+    // helper:對某天某班別,算現場計算結果 (套用 fallback 用) — 支援 rulesHistory
     const _bwComputedCache = {};
     const _bwGetComputed = (ds, dayDiff) => {
       if(_bwComputedCache[ds]) return _bwComputedCache[ds];
       const result = {morning:[], noon:[], evening:[], attendance:[]};
-      if(!_bwPattern.length){ _bwComputedCache[ds] = result; return result; }
+      // 取該日有效 rules
+      const dr = getRulesForDate(setting, ds);
+      const dPat = (dr && dr.cyclePattern) || _bwPattern;
+      const dMorn = (dr && dr.morningCount) || 0;
+      const dNoon = (dr && dr.noonCount) || 0;
+      const dEve  = (dr && dr.eveningCount) || 0;
+      const dAtt  = (dr && dr.attendanceCount) || 0;
+      if(!dPat.length){ _bwComputedCache[ds] = result; return result; }
       const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
       const _seen = new Set();
       const _uniq = [];
@@ -5510,12 +5571,12 @@ function renderSummary(setting, period){
         _uniq.unshift(emp);
       }
       _uniq.forEach(emp => {
-        const cycPos = ((emp.startIndex - 1) + _bwPOffset + dayDiff) % _bwPattern.length;
-        const sym = _bwPattern[cycPos];
-        if(sym === '早'){ if(_bwMorn === 0 || result.morning.length < _bwMorn) result.morning.push(emp.name); }
-        else if(sym === '午'){ if(_bwNoon === 0 || result.noon.length < _bwNoon) result.noon.push(emp.name); }
-        else if(sym === '晚'){ if(_bwEve === 0 || result.evening.length < _bwEve) result.evening.push(emp.name); }
-        else if(sym === '出勤'){ if(_bwAtt === 0 || result.attendance.length < _bwAtt) result.attendance.push(emp.name); }
+        const cycPos = ((emp.startIndex - 1) + _bwPOffset + dayDiff) % dPat.length;
+        const sym = dPat[cycPos];
+        if(sym === '早'){ if(dMorn === 0 || result.morning.length < dMorn) result.morning.push(emp.name); }
+        else if(sym === '午'){ if(dNoon === 0 || result.noon.length < dNoon) result.noon.push(emp.name); }
+        else if(sym === '晚'){ if(dEve === 0 || result.evening.length < dEve) result.evening.push(emp.name); }
+        else if(sym === '出勤'){ if(dAtt === 0 || result.attendance.length < dAtt) result.attendance.push(emp.name); }
       });
       _bwComputedCache[ds] = result;
       return result;
@@ -5726,14 +5787,18 @@ function renderScheduleTable(setting, period){
   const SHIFT_LABELS_TO_KEY_LOCAL = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
   const computeShiftCell = (ds) => {
     const result = {morning:[], noon:[], evening:[], attendance:[]};
-    if(!pattern.length) return result;
+    // 依該日 rules (支援 rulesHistory 切換)
+    const dayRules = getRulesForDate(setting, ds);
+    const dayPattern = (dayRules && dayRules.cyclePattern) || pattern;
+    const dayMorn = (dayRules && dayRules.morningCount) || 0;
+    const dayNoon = (dayRules && dayRules.noonCount) || 0;
+    const dayEve  = (dayRules && dayRules.eveningCount) || 0;
+    const dayAtt  = (dayRules && dayRules.attendanceCount) || 0;
+    if(!dayPattern.length) return result;
     const dt = parseDate(ds);
     const dayDiff = Math.floor((dt - startD) / 86400000);
-    if(dayDiff < 0 || dayDiff >= 56) return result;   // 區間外
-    // 取當日有效員工 (考慮 from/to 區間切割)
+    if(dayDiff < 0 || dayDiff >= 56) return result;
     const dayEffEmps = getEffectiveEmployees(setting.employees, ds);
-    // 強制去重:同組最多 1 人 (避免 from/to 都空時 getEffectiveEmployees 回傳多筆同組)
-    // 多筆時取「最後一筆」(通常設定 UI 上排在後面的是「現任」員工)
     const seenGroups = new Set();
     const uniqueByGroup = [];
     for(let i = dayEffEmps.length - 1; i >= 0; i--){
@@ -5744,38 +5809,47 @@ function renderScheduleTable(setting, period){
       uniqueByGroup.unshift(emp);
     }
     uniqueByGroup.forEach(emp => {
-      // 過濾「name 是純組別字母」的佔位員工 (例如 {name:'A', group:'A'})
-      // 這類員工是舊系統的虛擬員工,不該真的填入 cell — 跳過
       if(emp.name === emp.group) return;
-      const cycPos = ((emp.startIndex - 1) + periodOffset + dayDiff) % pattern.length;
-      const sym = pattern[cycPos];
-      // 上限保險 (跟 autoGenerate 一致):cell 已滿不再 push
+      const cycPos = ((emp.startIndex - 1) + periodOffset + dayDiff) % dayPattern.length;
+      const sym = dayPattern[cycPos];
       if(sym === '早'){
-        if(morn === 0 || result.morning.length < morn) result.morning.push(emp.name);
+        if(dayMorn === 0 || result.morning.length < dayMorn) result.morning.push(emp.name);
       } else if(sym === '午'){
-        if(noon === 0 || result.noon.length < noon) result.noon.push(emp.name);
+        if(dayNoon === 0 || result.noon.length < dayNoon) result.noon.push(emp.name);
       } else if(sym === '晚'){
-        if(eve === 0 || result.evening.length < eve) result.evening.push(emp.name);
+        if(dayEve === 0 || result.evening.length < dayEve) result.evening.push(emp.name);
       } else if(sym === '出勤'){
-        if(att === 0 || result.attendance.length < att) result.attendance.push(emp.name);
+        if(dayAtt === 0 || result.attendance.length < dayAtt) result.attendance.push(emp.name);
       }
       // 其他符號 (休) 不填
     });
     return result;
   };
 
-  const hasNoon = (setting.rules.noonCount || 0) > 0;
-  const hasAttendance = (setting.rules.attendanceCount || 0) > 0;
+  // ─── 顯示哪些班別 row ─────────────────────────────────────────
+  // 取整個 8 週區間內所有 rules (rulesHistory + 預設) 的聯集
+  // 例:前半 出勤 1 + 後半 早 1 晚 1 → row 顯示「早 / 出勤 / 晚」三列
+  const _segs = getRulesSegmentsInPeriod(setting, period.startDate);
+  let _hasMorn = false, _hasNoon = false, _hasEve = false, _hasAtt = false;
+  _segs.forEach(seg => {
+    const r = seg.rules || {};
+    if((r.morningCount || 0) > 0) _hasMorn = true;
+    if((r.noonCount || 0) > 0) _hasNoon = true;
+    if((r.eveningCount || 0) > 0) _hasEve = true;
+    if((r.attendanceCount || 0) > 0) _hasAtt = true;
+  });
+  const hasNoon = _hasNoon;
+  const hasAttendance = _hasAtt;
 
   // Build the list of shift rows shown.
-  // Attendance mode: ONLY one '出勤' row, no morning/evening split.
-  // Otherwise: 早 + (午 if needed) + 晚.
-  let shiftRows;
-  if(hasAttendance){
-    shiftRows = [{key:'attendance', label:'出勤', display:'出勤'}];
-  } else if(hasNoon){
-    shiftRows = [{key:'morning', label:'早'},{key:'noon', label:'午'},{key:'evening', label:'晚'}];
-  } else {
+  // 若 rulesHistory 中混合了出勤班+早晚班,所有出現過的班別都顯示
+  let shiftRows = [];
+  if(_hasMorn) shiftRows.push({key:'morning', label:'早'});
+  if(_hasNoon) shiftRows.push({key:'noon', label:'午'});
+  if(_hasAtt)  shiftRows.push({key:'attendance', label:'出勤', display:'出勤'});
+  if(_hasEve)  shiftRows.push({key:'evening', label:'晚'});
+  // 若整段區間都沒設 (理論上不會),預設早+晚
+  if(!shiftRows.length){
     shiftRows = [{key:'morning', label:'早'},{key:'evening', label:'晚'}];
   }
 
@@ -8725,46 +8799,44 @@ async function autoGenerate(){
 
       const day = {morning:[], noon:[], evening:[], attendance:[], off:[]};
 
+      // ─── 取得「該日有效的 rules」(支援 rulesHistory 切換日) ──────
+      // 若 setting.rulesHistory 中有切點 <= ds,使用該切點的 rules;否則用 setting.rules (預設)
+      const dayRules = getRulesForDate(setting, ds);
+      const dayPattern = (dayRules && dayRules.cyclePattern) || pattern;
+      const dayMorn = (dayRules && dayRules.morningCount) || 0;
+      const dayNoon = (dayRules && dayRules.noonCount) || 0;
+      const dayEve  = (dayRules && dayRules.eveningCount) || 0;
+      const dayAtt  = (dayRules && dayRules.attendanceCount) || 0;
+      // 兩班制保險判斷也依該日 rules
+      const _twoShiftMode = (dayMorn > 0 && dayEve > 0 && dayNoon === 0 && dayAtt === 0);
+
       // ─── 依日期套用區間 (from/to) ────────────────────────────────
-      // 同組可能有多筆員工 (如「A」佔位無區間 + 「瑜軒」5/16~7/4),
-      // 用 getEffectiveEmployees 取「該日該組唯一有效的員工」,
-      // 自動排班才不會在區間外塞錯人 (例如瑜軒 5/16 才生效,5/11 應填「A」)。
-      // 對於每組,取出當天的有效員工;但 startIndex 仍以「該員工自己的設定」為準。
       const dayEffEmps = getEffectiveEmployees(employees, ds);
-      // 取出每個 group 唯一一筆有效員工,放成 set 方便後面比對
       const effSet = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
 
-      // 兩班制保險:同員工不可同日早晚都上班 (放在 push 早班後 + push 晚班前都檢查)
-      const _twoShiftMode = shouldCheckSameDayDuplicate(setting);
       employees.forEach(emp=>{
-        // 該員工今天若不是該組的有效員工 → 跳過 (會由同組其他員工接棒)
         if(!effSet.has(emp.name)) return;
-        // emp.startIndex applies to period 0; subsequent periods continue the cycle
-        const cycPos = ((emp.startIndex - 1) + periodOffset + i) % pattern.length;
-        const sym = pattern[cycPos];
-        // 第二道保險:cell 已滿 (已達 morningCount/noonCount/...) 不再 push
-        // 即使 startIndex 沒衝突,某些循環模式仍可能讓多組同天同班 →
-        // 寧可少排不可超排,超出的員工那班視為「休」(不顯示)
+        const cycPos = ((emp.startIndex - 1) + periodOffset + i) % dayPattern.length;
+        const sym = dayPattern[cycPos];
         if(sym==='早'){
-          if(morn === 0 || day.morning.length < morn) day.morning.push(emp.name);
+          if(dayMorn === 0 || day.morning.length < dayMorn) day.morning.push(emp.name);
           else day.off.push(emp.name);
         } else if(sym==='午'){
-          if(noon === 0 || day.noon.length < noon) day.noon.push(emp.name);
+          if(dayNoon === 0 || day.noon.length < dayNoon) day.noon.push(emp.name);
           else day.off.push(emp.name);
         } else if(sym==='晚'){
-          // 兩班制:若該員工已在早班 → 不可再排晚班 (視為休)
           if(_twoShiftMode && day.morning.includes(emp.name)){
             day.off.push(emp.name);
-          } else if(eve === 0 || day.evening.length < eve){
+          } else if(dayEve === 0 || day.evening.length < dayEve){
             day.evening.push(emp.name);
           } else {
             day.off.push(emp.name);
           }
         } else if(sym==='出勤'){
-          if(att === 0 || day.attendance.length < att) day.attendance.push(emp.name);
+          if(dayAtt === 0 || day.attendance.length < dayAtt) day.attendance.push(emp.name);
           else day.off.push(emp.name);
         } else {
-          day.off.push(emp.name); // 休
+          day.off.push(emp.name);
         }
       });
 
@@ -8832,6 +8904,7 @@ function loadSettingsForPosition(){
   renderEmployeeList(s.employees);
   renderCyclePattern(s.rules.cyclePattern);
   renderEmployeeStartList(s.employees, s.rules.cyclePattern);
+  renderRulesHistoryList();
   renderPeriodList(s.periods);
 }
 
@@ -9098,6 +9171,117 @@ function renderEmployeeList(employees){
       renderEmployeeStartList(s.employees, s.rules.cyclePattern);
     });
   });
+}
+
+// ─── 規則切換日管理 ──────────────────────────────────────────────
+function renderRulesHistoryList(){
+  const box = $('rulesHistoryList');
+  if(!box) return;
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  const hist = s.rulesHistory || [];
+  if(!hist.length){
+    box.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:6px;">尚未設定任何切換日</div>';
+    return;
+  }
+  box.innerHTML = hist.map((h, idx) => {
+    const r = h.rules || {};
+    const pat = Array.isArray(r.cyclePattern) ? r.cyclePattern.join(' ') : '';
+    return `
+      <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; background:#f4f1e8; border-radius:6px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label style="font-weight:600; color:var(--ink); font-size:13px; white-space:nowrap;">從</label>
+          <input type="date" value="${h.from || ''}" onchange="updateRulesHistoryFrom(${idx}, this.value)" style="font-size:13px; padding:4px 8px;"/>
+          <label style="font-weight:600; color:var(--ink); font-size:13px; white-space:nowrap;">起套用新規則</label>
+          <button class="btn" type="button" onclick="removeRulesHistoryEntry(${idx})" title="刪除此切換日" style="margin-left:auto; padding:4px 10px; background:#fde6e6; color:#a83838; font-size:12px;">✕ 刪除</button>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; font-size:12px;">
+          <div><label style="color:var(--muted); font-size:11px;">早班</label><input type="number" min="0" max="4" value="${r.morningCount||0}" onchange="updateRulesHistoryRule(${idx},'morningCount',this.value)" style="width:100%;"/></div>
+          <div><label style="color:var(--muted); font-size:11px;">午班</label><input type="number" min="0" max="4" value="${r.noonCount||0}" onchange="updateRulesHistoryRule(${idx},'noonCount',this.value)" style="width:100%;"/></div>
+          <div><label style="color:var(--muted); font-size:11px;">晚班</label><input type="number" min="0" max="4" value="${r.eveningCount||0}" onchange="updateRulesHistoryRule(${idx},'eveningCount',this.value)" style="width:100%;"/></div>
+          <div><label style="color:var(--muted); font-size:11px;">出勤</label><input type="number" min="0" max="4" value="${r.attendanceCount||0}" onchange="updateRulesHistoryRule(${idx},'attendanceCount',this.value)" style="width:100%;"/></div>
+        </div>
+        <div>
+          <label style="color:var(--muted); font-size:11px;">循環 (用空格分隔,例:早 晚 休)</label>
+          <input type="text" value="${pat}" placeholder="如:早 晚 休" onchange="updateRulesHistoryPattern(${idx}, this.value)" style="width:100%; font-size:13px;"/>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function addRulesHistoryEntry(){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  if(!s.rulesHistory) s.rulesHistory = [];
+  const defaultRules = JSON.parse(JSON.stringify(s.rules || {}));
+  const period = (s.periods || [])[State.currentPeriodIndex] || (s.periods || [])[0];
+  let defaultFrom = '';
+  if(period && period.startDate){
+    defaultFrom = fmt(addDays(parseDate(period.startDate), 28));
+  } else {
+    defaultFrom = fmt(addDays(new Date(), 14));
+  }
+  s.rulesHistory.push({ from: defaultFrom, rules: defaultRules });
+  sortRulesHistory(s);
+  renderRulesHistoryList();
+}
+
+function removeRulesHistoryEntry(idx){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  if(!s.rulesHistory) return;
+  s.rulesHistory.splice(idx, 1);
+  renderRulesHistoryList();
+}
+
+function updateRulesHistoryFrom(idx, val){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  s.rulesHistory[idx].from = String(val || '').trim();
+  sortRulesHistory(s);
+  renderRulesHistoryList();
+}
+
+function updateRulesHistoryRule(idx, key, val){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  if(!s.rulesHistory[idx].rules) s.rulesHistory[idx].rules = {};
+  s.rulesHistory[idx].rules[key] = parseInt(val) || 0;
+}
+
+function updateRulesHistoryPattern(idx, val){
+  const p = $('setPosition').value;
+  const oldP = State.currentPosition;
+  State.currentPosition = p;
+  const s = getCurrentSetting();
+  State.currentPosition = oldP;
+  if(!s.rulesHistory || !s.rulesHistory[idx]) return;
+  if(!s.rulesHistory[idx].rules) s.rulesHistory[idx].rules = {};
+  const parsed = parsePatternString(val);
+  s.rulesHistory[idx].rules.cyclePattern = parsed;
+}
+
+function sortRulesHistory(s){
+  if(!s.rulesHistory) return;
+  s.rulesHistory.sort((a,b) => String(a.from||'').localeCompare(String(b.from||'')));
 }
 
 function addEmployee(){
