@@ -3801,6 +3801,61 @@ function detectWorkBalanceIssues(unsavedRecords){
   return warnings;
 }
 
+// ─── 偵測「同日早晚同人」衝突 ─────────────────────────────────────
+// 兩班制 (早 1 人 + 晚 1 人,無午無出勤) 不允許某員工同日早晚都上班。
+// 掃描所有 (branch, position, period, date) 組合,套用既有 swap 後比對。
+// 「已結束的 8 週區間」(endDate < 今日) 不掃描。
+// 回傳:["<b>埔心·藥師</b> · 7/16 早晚都是 B", ...]
+function detectSameDayDuplicates(){
+  const warnings = [];
+  const todayStr = fmt(new Date());
+  const SHIFT_LABEL_TO_KEY = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
+  // 逐 branch/position 掃描
+  Object.keys(State.settings || {}).forEach(branch => {
+    Object.keys(State.settings[branch] || {}).forEach(position => {
+      const setting = State.settings[branch][position];
+      if(!shouldCheckSameDayDuplicate(setting)) return;
+      (setting.periods || []).forEach(period => {
+        if(!period.startDate) return;
+        // 已結束區間不掃
+        const endD = addDays(parseDate(period.startDate), 8*7-1);
+        if(fmt(endD) < todayStr) return;
+        const schedKey = `${branch}__${position}__${period.startDate}`;
+        const sched = State.schedules[schedKey];
+        if(!sched || !sched.shifts) return;
+        // 對每一天:套用 swap 後檢查 cell 早晚是否同人
+        Object.keys(sched.shifts).forEach(ds => {
+          const raw = sched.shifts[ds] || {};
+          const eff = JSON.parse(JSON.stringify(raw));
+          // 套用既有 swap (含 unsaved)
+          const swapsOnDay = (State.swaps || []).filter(s =>
+            s.branch === branch && s.position === position &&
+            s.date === ds && s.mode === 'swap'
+          );
+          swapsOnDay.forEach(s => {
+            const orig = s.originalName;
+            const nm = (s.swapWith || [])[0];
+            if(!orig || !nm) return;
+            const sk = SHIFT_LABEL_TO_KEY[s.shift];
+            if(sk && eff[sk] && eff[sk].includes(orig)){
+              eff[sk] = eff[sk].map(n => n === orig ? nm : n);
+            }
+          });
+          // 比對:早班 vs 晚班
+          const morn = eff.morning || [];
+          const evening = eff.evening || [];
+          const dup = morn.filter(n => n && evening.includes(n));
+          if(dup.length){
+            const mm = String(ds).slice(5).replace('-','/');
+            warnings.push(`<b>${branch}·${position}</b> · ${mm} 早晚都是 <b>${dup[0]}</b>`);
+          }
+        });
+      });
+    });
+  });
+  return warnings;
+}
+
 // 點字卡 -N 徽章 → 顯示該組的明細 (按原因分類聚合,例:私事支援 1 班、缺人 15 班)
 function showOffDetails(group, kind, evt){
   if(evt){ evt.stopPropagation(); }
@@ -8371,6 +8426,29 @@ async function flushUnsavedChanges(){
     if(!proceed) return;
   }
 
+  // ─── 儲存前同日同人掃描 ─────────────────────────────────────────
+  // 兩班制 (早+晚,每班 1 人) 不允許「同一天 早班姓名 = 晚班姓名」
+  // 掃描所有 cell (套用既有 swap 後),列出衝突日,讓管理員確認
+  const dupWarnings = detectSameDayDuplicates();
+  if(dupWarnings.length){
+    const html = `
+      <div style="text-align:left; font-size:14px; line-height:1.7;">
+        <div style="margin-bottom:10px; color:#a83838; font-weight:600;">⚠️ 偵測到「同日早晚同人」:</div>
+        ${dupWarnings.map(w => `<div style="padding:6px 10px; margin-bottom:6px; background:#fde6e6; border-radius:6px;">${w}</div>`).join('')}
+        <div style="margin-top:12px; font-size:13px; color:var(--muted);">
+          兩班制不允許同人同日早晚都上班。仍要繼續儲存嗎?
+        </div>
+      </div>
+    `;
+    const proceed = await showConfirmModal(html, {
+      icon: '⚠️',
+      title: '同日同人確認',
+      confirmText: '仍要儲存',
+      cancelText: '取消並調整'
+    });
+    if(!proceed) return;
+  }
+
   showLoading(`儲存中… (${unsaved.length + deletions.length} 筆)`);
 
   // 1. Delete records that were edited or removed
@@ -8517,6 +8595,14 @@ async function autoGenerate(){
     if(noon > 0 && counts.noon.length > noon) conflictDays.push({cycDay: cd+1, shift:'午', groups: counts.noon, limit: noon});
     if(eve > 0 && counts.evening.length > eve) conflictDays.push({cycDay: cd+1, shift:'晚', groups: counts.evening, limit: eve});
     if(att > 0 && counts.attendance.length > att) conflictDays.push({cycDay: cd+1, shift:'出勤', groups: counts.attendance, limit: att});
+    // 兩班制(只有早+晚,沒有午沒出勤,每班 1 人):同組不可同日早晚都上
+    if(shouldCheckSameDayDuplicate(setting)){
+      const inMorn = new Set(counts.morning);
+      const dup = counts.evening.filter(g => inMorn.has(g));
+      if(dup.length){
+        conflictDays.push({cycDay: cd+1, shift:'早+晚同人', groups: dup, limit: '兩班制不允許'});
+      }
+    }
   }
   if(conflictDays.length){
     const sample = conflictDays.slice(0, 6).map(c =>
@@ -8628,6 +8714,8 @@ async function autoGenerate(){
       // 取出每個 group 唯一一筆有效員工,放成 set 方便後面比對
       const effSet = new Set(dayEffEmps.map(e => e.name).filter(Boolean));
 
+      // 兩班制保險:同員工不可同日早晚都上班 (放在 push 早班後 + push 晚班前都檢查)
+      const _twoShiftMode = shouldCheckSameDayDuplicate(setting);
       employees.forEach(emp=>{
         // 該員工今天若不是該組的有效員工 → 跳過 (會由同組其他員工接棒)
         if(!effSet.has(emp.name)) return;
@@ -8644,8 +8732,14 @@ async function autoGenerate(){
           if(noon === 0 || day.noon.length < noon) day.noon.push(emp.name);
           else day.off.push(emp.name);
         } else if(sym==='晚'){
-          if(eve === 0 || day.evening.length < eve) day.evening.push(emp.name);
-          else day.off.push(emp.name);
+          // 兩班制:若該員工已在早班 → 不可再排晚班 (視為休)
+          if(_twoShiftMode && day.morning.includes(emp.name)){
+            day.off.push(emp.name);
+          } else if(eve === 0 || day.evening.length < eve){
+            day.evening.push(emp.name);
+          } else {
+            day.off.push(emp.name);
+          }
         } else if(sym==='出勤'){
           if(att === 0 || day.attendance.length < att) day.attendance.push(emp.name);
           else day.off.push(emp.name);
