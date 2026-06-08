@@ -7551,6 +7551,26 @@ async function submitApply(){
       return;
     }
 
+    // ─── 兩班制前置檢查:同日同人 ─────────────────────────────────
+    // 不依賴 validateSwapWorkHours Step 5,獨立檢查,確保員工申請不會通過同日同人換班
+    // 範例:政嘉 7/16 晚 ⇄ B 7/14 晚 → 換完 7/16 變 早 B + 晚 B → 擋
+    const _bSettings = (State.settings || {})[branch];
+    const _bSetting = _bSettings && _bSettings[position];
+    if(_bSetting && shouldCheckSameDayDuplicate(_bSetting)){
+      const _dupCheck = validateSameDayDuplicate(
+        branch, position,
+        date, shift, name,
+        targetDate, targetShift, partner
+      );
+      if(!_dupCheck.ok){
+        showAlertModal(
+          '<b style="color:#a83838;">' + _dupCheck.error + '</b>',
+          {title: '⛔ 換班規則檢查', duration: 4000}
+        );
+        return;
+      }
+    }
+
     // Strict work-hour validation (uses src date as anchor)
     const check = validateSwapWorkHours(branch, position, date, name, partner, targetDate);
     if(!check.ok){
