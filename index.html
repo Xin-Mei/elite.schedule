@@ -6445,7 +6445,7 @@ function openQuickSwapPickerModal(date, shift, name){
   $('qsPickerCellName').textContent = name;
   // 列出同院區同職位員工 (排除當前 cell 顯示的人)
   const setting = getCurrentSetting();
-  const emps = (setting.employees || []).filter(e => e.name && e.name !== name);
+  const emps = getEffectiveEmployees(getEmployeesForDate(setting, date), date).filter(e => e.name && e.name !== name);
   const listEl = $('qsPickerEmployeeList');
   if(!emps.length){
     listEl.innerHTML = `<div style="color:var(--muted); padding:12px; font-size:13px;">此職位沒有其他員工可換</div>`;
@@ -6765,7 +6765,7 @@ function openSwapModal(date, shift, name){
     reasonSwapBtn.title = '';
   }
   const pillsBox = $('swapPartnerPills');
-  const partners = setting.employees.filter(e => e.name && e.name !== name);
+  const partners = getEffectiveEmployees(getEmployeesForDate(setting, date), date).filter(e => e.name && e.name !== name);
   if(partners.length === 0){
     pillsBox.innerHTML = `<div class="empty-msg">⚠️ 此院區除本人外無其他同職位員工可換班</div>`;
   } else {
@@ -7108,7 +7108,7 @@ function populateComboBlock(){
   const pillsBox = $('comboPartnerPills');
   if(!pillsBox) return;
   // partner 候選:同院區同職位、不是自己 (含佔位符員工如 'B')
-  const partners = (setting.employees || []).filter(e => e.name && e.name !== me);
+  const partners = getEffectiveEmployees(getEmployeesForDate(setting, date), date).filter(e => e.name && e.name !== me);
   if(partners.length === 0){
     pillsBox.innerHTML = `<div class="empty-msg">⚠️ 此院區除本人外無其他同職位員工可換班</div>`;
   } else {
