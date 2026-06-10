@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v11</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v12</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6480,10 +6480,15 @@ function confirmQuickSwapPick(targetName, targetGroup){
   const sched = State.schedules[`${State.currentBranch}__${State.currentPosition}__${setting.periods[State.currentPeriodIndex].startDate}`];
   const SHIFT_KEYS = {'早':'morning','午':'noon','晚':'evening','出勤':'attendance'};
   const sk = SHIFT_KEYS[shift];
-  let originalName = name;
+  // originalName 必須等於「畫面實際顯示的人」(renderCell 以此比對 swapMap)。
+  // sheet 原值可能經 orphan fallback 被取代 (例:舊名「許」顯示成「瑞宇」),
+  // 若用 sheet 原值會對不到 → 換班建立了卻畫不出來。故一律採用 displayName。
+  const originalName = name;
+  // sheet 原始值 (可能是 orphan 舊名),用於一併清掉對應到它的殘留 swap
+  let sheetRawName = '';
   if(sched && sched.shifts && sched.shifts[date] && sk){
     const arr = sched.shifts[date][sk] || [];
-    if(arr.length > 0) originalName = arr[0];
+    if(arr.length > 0) sheetRawName = arr[0];
   }
 
   // 偵測該 cell 是否已有舊 swap (mode=swap, 同 originalName) — 若有,需先取代
@@ -6493,7 +6498,7 @@ function confirmQuickSwapPick(targetName, targetGroup){
     s.branch === State.currentBranch &&
     s.position === State.currentPosition &&
     s.date === date && s.shift === shift &&
-    s.originalName === originalName &&
+    (s.originalName === originalName || (sheetRawName && s.originalName === sheetRawName)) &&
     s.mode === 'swap'
   );
   let oldPaired = null;
