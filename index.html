@@ -4691,7 +4691,7 @@ function computeRuleSegments(setting, period){
     for(let i = dayEffEmps.length - 1; i >= 0; i--){
       const emp = dayEffEmps[i];
       if(!emp || !emp.group || !emp.name) continue;
-      if(emp.name === emp.group) continue;
+      // 姓名=組別字母 視為合法佔位員工,不跳過
       if(seen.has(emp.group)) continue;
       seen.add(emp.group);
       uniq.unshift(emp);
@@ -5936,7 +5936,7 @@ function renderScheduleTable(setting, period){
       uniqueByGroup.unshift(emp);
     }
     uniqueByGroup.forEach(emp => {
-      if(emp.name === emp.group) return;
+      // 姓名=組別字母 (如「A」) 視為合法的人力缺口佔位員工,不跳過
       const cycPos = ((emp.startIndex - 1) + getCycleBaseForDate(setting, period, ds)) % dayPattern.length;
       const sym = dayPattern[cycPos];
       if(sym === '早'){
@@ -10484,7 +10484,7 @@ async function downloadA4(){
                 for(let i = dayEffEmps.length - 1; i >= 0; i--){
                   const emp = dayEffEmps[i];
                   if(!emp || !emp.group || !emp.name) continue;
-                  if(emp.name === emp.group) continue;
+                  // 姓名=組別字母 視為合法佔位員工,不跳過
                   if(_seen.has(emp.group)) continue;
                   _seen.add(emp.group);
                   _uniq.unshift(emp);
