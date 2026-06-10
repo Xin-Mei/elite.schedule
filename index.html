@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v12</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v13</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -7114,7 +7114,7 @@ function populateComboBlock(){
   const pillsBox = $('comboPartnerPills');
   if(!pillsBox) return;
   // partner 候選:同院區同職位、不是自己 (含佔位符員工如 'B')
-  const partners = getEffectiveEmployees(getEmployeesForDate(setting, date), date).filter(e => e.name && e.name !== me);
+  const partners = getEffectiveEmployees(getEmployeesForDate(setting, _swapCtx.date), _swapCtx.date).filter(e => e.name && e.name !== me);
   if(partners.length === 0){
     pillsBox.innerHTML = `<div class="empty-msg">⚠️ 此院區除本人外無其他同職位員工可換班</div>`;
   } else {
