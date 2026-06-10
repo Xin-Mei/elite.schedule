@@ -2384,6 +2384,7 @@
 </style>
 </head>
 <body>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v11</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6067,13 +6068,13 @@ function renderScheduleTable(setting, period){
             if(!n) return n;
             if(validNames.has(n)) return n;          // 在名單 → 保留
             if(n === 'A' || n === 'B' || n === 'C' || n === 'D') {
-              // 純組別字母 (如「D」) → 用現場計算該組當日員工取代
+              // 純組別字母 (如「A」):若該組有「真實姓名」員工 → 解析成該人;
+              // 否則「A」是刻意保留的人力缺口佔位 → 保留顯示,不可清成空白
               const computed = _getComputed();
               const computedNames = computed[sr.key] || [];
-              // 看現場計算 cell 中哪個是該組的人
               const altEff = dayEffEmps.find(e => e.group === n);
-              if(altEff && computedNames.includes(altEff.name)) return altEff.name;
-              return null;   // 該組沒人,顯示空
+              if(altEff && altEff.name && altEff.name !== n && computedNames.includes(altEff.name)) return altEff.name;
+              return n;
             }
             // 其他情況 (例如「陳」歷史殘留):
             //   現場計算該班別應該是誰 (任何在名單的人) → 取代
@@ -10509,8 +10510,8 @@ async function downloadA4(){
               const computed = _a4GetComputed();
               const computedNames = computed[shiftKey(shift)] || [];
               const altEff = dayEffEmps.find(e => e.group === n);
-              if(altEff && computedNames.includes(altEff.name)) return altEff.name;
-              return null;
+              if(altEff && altEff.name && altEff.name !== n && computedNames.includes(altEff.name)) return altEff.name;
+              return n;
             }
             // 歷史殘留 → 取現場計算結果取代
             const computed = _a4GetComputed();
