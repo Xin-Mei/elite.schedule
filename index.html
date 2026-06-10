@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v13</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v14</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -7826,6 +7826,7 @@ async function submitApply(){
       reason: '換班',
       mode: 'swap',
       swapWith: [partner],
+      operator: getOperatorLabel(),
       coverName: '',
       note,
       status: 'approved',
@@ -7839,6 +7840,7 @@ async function submitApply(){
       reason: '換班',
       mode: 'swap',
       swapWith: [name],
+      operator: getOperatorLabel(),
       coverName: '',
       note: note ? note + ' (對方換班)' : '對方換班',
       status: 'approved',
@@ -7870,6 +7872,7 @@ async function submitApply(){
     mode: 'support',
     swapWith: [],
     coverName: `${coverName} (${coverBranch})`,
+    operator: getOperatorLabel(),
     note,
     status: 'pending',
     createdAt: new Date().toISOString()
@@ -8725,10 +8728,8 @@ async function flushUnsavedChanges(){
     delete cleanRec._unsaved;
     // Replace temp id with real one
     cleanRec.id = (rec.mode === 'leave' ? 'L' : 'S') + Date.now() + Math.floor(Math.random()*1000);
-    // 「缺人」紀錄:附上操作者身分 (寫入 _缺人紀錄 的 operator 欄)
-    if(rec.mode === 'leave' && String(rec.reason || '').trim() === '缺人'){
-      cleanRec.operator = getOperatorLabel();
-    }
+    // 附上操作者身分 (後端只會寫入有 operator 欄的 sheet:_缺人紀錄、_換班紀錄)
+    cleanRec.operator = getOperatorLabel();
     const apiAction = (rec.mode === 'leave') ? 'addLeave' : 'addSwap';
     const res = await api(apiAction, {record: cleanRec});
     if(!res.ok){
