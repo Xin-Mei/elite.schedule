@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v14</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v15</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -8140,6 +8140,9 @@ function applySwapModeUI(){
     } else {
       // 根據當前班別動態調整時段下拉的選項
       updateSplitPeriodOptions();
+      // 同步單一/兩段代班區塊顯示 (依勾選狀態) — 確保開啟時「單一代班」院區/姓名直接顯示,
+      // 不需先勾「兩段班」再取消 (修正:過去 leave/support 開啟時未同步單一區塊顯示)
+      onSwapSplitToggle();
     }
   }
 
