@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v15</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v16</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6491,33 +6491,37 @@ function confirmQuickSwapPick(targetName, targetGroup){
     if(arr.length > 0) sheetRawName = arr[0];
   }
 
-  // 偵測該 cell 是否已有舊 swap (mode=swap, 同 originalName) — 若有,需先取代
-  // 因為兩筆 swap on 同一格同一原 originalName 會打架
-  // 同時也找配對的另一筆 (若是先前的雙向換班,連帶取消對方那筆)
-  const oldSwap = (State.swaps || []).find(s =>
-    s.branch === State.currentBranch &&
-    s.position === State.currentPosition &&
-    s.date === date && s.shift === shift &&
-    (s.originalName === originalName || (sheetRawName && s.originalName === sheetRawName)) &&
-    s.mode === 'swap'
-  );
-  let oldPaired = null;
-  if(oldSwap){
-    const partner = oldSwap.swapWith && oldSwap.swapWith[0];
-    if(partner){
-      oldPaired = (State.swaps || []).find(o =>
-        o !== oldSwap &&
-        o.mode === 'swap' &&
-        o.branch === oldSwap.branch &&
-        o.position === oldSwap.position &&
-        o.originalName === partner &&
-        Array.isArray(o.swapWith) && o.swapWith[0] === oldSwap.originalName &&
-        Math.abs(new Date(o.createdAt) - new Date(oldSwap.createdAt)) < 5000
-      );
+  // 偵測並清掉「會與本次換班衝突」的同格舊 swap (mode=swap),避免循環/打架:
+  //   • originalName 同名 (同員工再次換班 → 取代)
+  //   • originalName === sheet 原值 (orphan 舊名殘留)
+  //   • originalName === targetName (反向換班殘留:已有「享玉→語蓁」,本次「語蓁→享玉」會繞回語蓁)
+  const _conflictOrigins = new Set([originalName, targetName]);
+  if(sheetRawName) _conflictOrigins.add(sheetRawName);
+  const _toRemove = new Set();
+  (State.swaps || []).forEach(s => {
+    if(s.branch === State.currentBranch && s.position === State.currentPosition &&
+       s.date === date && s.shift === shift && s.mode === 'swap' &&
+       _conflictOrigins.has(s.originalName)){
+      _toRemove.add(s);
     }
-  }
-  // 把舊的從 State.swaps 移除 + 加入 pendingDeletions (若 sheet 中已存在)
-  [oldSwap, oldPaired].filter(Boolean).forEach(rec => {
+  });
+  // 連帶移除配對紀錄 (雙向換班的另一筆:同批次 createdAt 5 秒內、互換)
+  [..._toRemove].forEach(cs => {
+    const partner = cs.swapWith && cs.swapWith[0];
+    if(!partner) return;
+    (State.swaps || []).forEach(o => {
+      if(o.mode === 'swap' && o.branch === cs.branch && o.position === cs.position &&
+         o.originalName === partner && Array.isArray(o.swapWith) && o.swapWith[0] === cs.originalName &&
+         Math.abs(new Date(o.createdAt) - new Date(cs.createdAt)) < 5000){
+        _toRemove.add(o);
+      }
+    });
+  });
+  const _removedList = [..._toRemove];
+  const oldSwap = _removedList.length ? _removedList[0] : null;   // 供「還原」與提示沿用
+  const oldPaired = null;
+  // 移除 + 標記刪除 (若 sheet 中已存在)
+  _removedList.forEach(rec => {
     const idx = (State.swaps || []).findIndex(s => s === rec);
     if(idx >= 0) State.swaps.splice(idx, 1);
     const rid = String(rec.id || '');
@@ -6555,7 +6559,7 @@ function confirmQuickSwapPick(targetName, targetGroup){
         );
         closeModal('quickSwapPickerModal');
         // 把剛刪的舊 swap 復原 (因為前面已經刪了,但這次擋下,要還原)
-        [oldSwap, oldPaired].filter(Boolean).forEach(rec => {
+        _removedList.forEach(rec => {
           if(!State.swaps.includes(rec)) State.swaps.push(rec);
           const rid = String(rec.id || '');
           if(!rid.startsWith('STMP') && State.pendingDeletions){
