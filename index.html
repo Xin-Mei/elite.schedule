@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v16</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v17</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -4471,9 +4471,14 @@ function restoreFromHash(){
 // 取得目前院區隱藏的職位列表
 function getHiddenPositions(){
   const b = State.currentBranch || '';
+  // 1) 優先使用 Sheet 共享設定 (__posvis__) — 管理員設定後,所有員工/裝置都一致
+  const shared = State.settings && State.settings[b] && State.settings[b]['__posvis__'];
+  if(shared && Array.isArray(shared.hidden)){
+    return shared.hidden;
+  }
+  // 2) 否則用本機 localStorage / 預設(減重櫃台預設隱藏 — 非全院區都有此職位)
   if(!State.hiddenPositionsByBranch) State.hiddenPositionsByBranch = {};
   if(!State.hiddenPositionsByBranch[b]){
-    // 從 localStorage 還原;若無則套用預設(減重櫃台預設隱藏 — 非全院區都有此職位)
     let stored = null;
     try {
       const raw = localStorage.getItem('elite_hidden_positions_' + b);
@@ -4492,6 +4497,11 @@ function setHiddenPositions(arr){
   try {
     localStorage.setItem('elite_hidden_positions_' + b, JSON.stringify(arr));
   } catch(_){}
+  // 同步到 Sheet 共享設定 (__posvis__),讓所有員工/裝置看到一致的職位顯示
+  if(!State.settings) State.settings = {};
+  if(!State.settings[b]) State.settings[b] = {};
+  State.settings[b]['__posvis__'] = { hidden: arr.slice() };
+  try { api('saveSettings', { branch: b, position: '__posvis__', data: { hidden: arr.slice() } }); } catch(_){}
 }
 
 function togglePositionVisibility(pos){
