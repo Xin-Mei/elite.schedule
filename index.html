@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v17</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v18</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6543,7 +6543,7 @@ function confirmQuickSwapPick(targetName, targetGroup){
 
   // ─── 兩班制:同日同人檢核 (新換進來的人若已在同日另一班 → 擋下) ────
   // 快速換班是「單向」(沒有對方那邊的對調),只需檢查目標 cell 同日是否有同人
-  if(shouldCheckSameDayDuplicate(setting)){
+  if(shouldBlockSameDayDup(setting)){
     // 算出當日另一班 (早↔晚) 是誰
     const otherShift = (shift === '早') ? '晚' : (shift === '晚' ? '早' : null);
     if(otherShift){
@@ -7479,6 +7479,12 @@ function shouldCheckSameDayDuplicate(setting){
   return m > 0 && e > 0 && n === 0 && a === 0;
 }
 
+// 換班/儲存時的「同日同人」檢核開關 — 系統管理員登入時一律不檢核 (可自由安排)
+function shouldBlockSameDayDup(setting){
+  if(State.user && State.user.role === 'admin') return false;
+  return shouldCheckSameDayDuplicate(setting);
+}
+
 // ─── 兩班制換班檢查:同一天的早班與晚班不可為同一人 ───────────
 // 適用情境:管理員 swap modal 雙向換班 / 快速換班
 // 參數:
@@ -7648,7 +7654,7 @@ function validateSwapWorkHours(branch, position, date, applicantName, partnerNam
   // 同一天的「早」與「晚」不可為同一人 — 只在「兩班制(早+晚,每班 1 人,無午無出勤)」啟用
   //   • 早午晚三班制(noon>0) → 同人同日多班 OK,不檢查
   //   • 出勤班 → 一天只有一格,不檢查
-  if(shouldCheckSameDayDuplicate(setting) && targetDate){
+  if(shouldBlockSameDayDup(setting) && targetDate){
     // 重要:cell 的「實際員工」要套用既有 swap (因為 sheet 中的原排班可能已被先前的換班蓋過)
     // 例:5/11 晚 sheet 中是「麗巧」,但被一筆 swap 換成「寶怡」,
     //   寶怡點 5/11 晚 cell 時看到自己的名字 → 申請與 5/15 晚換 →
@@ -8484,7 +8490,7 @@ async function submitSwap(){
     }
     // ─── 兩班制:同日同人檢核 ─────────────────────────────
     // 換班後不可造成「同一天早班與晚班為同一人」
-    if(shouldCheckSameDayDuplicate(setting2)){
+    if(shouldBlockSameDayDup(setting2)){
       const checkRes = validateSameDayDuplicate(
         State.currentBranch, State.currentPosition,
         _swapCtx.date, _swapCtx.shift, _swapCtx.name,
@@ -8712,7 +8718,7 @@ async function flushUnsavedChanges(){
   // 兩班制 (早+晚,每班 1 人) 不允許「同一天 早班姓名 = 晚班姓名」
   // 掃描所有 cell (套用既有 swap 後),列出衝突日,讓管理員確認
   const dupWarnings = detectSameDayDuplicates();
-  if(dupWarnings.length){
+  if(dupWarnings.length && !(State.user && State.user.role === 'admin')){
     const html = `
       <div style="text-align:left; font-size:14px; line-height:1.7;">
         <div style="margin-bottom:10px; color:#a83838; font-weight:600;">⚠️ 偵測到「同日早晚同人」:</div>
