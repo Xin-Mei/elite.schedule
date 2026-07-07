@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v21</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v22</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -10562,7 +10562,7 @@ async function downloadA4(){
             return null;
           }).filter(n => n !== null);
         }
-        html += `<td style="text-align:center; vertical-align:middle; padding:3px 2px;">${cell.length? cell.map(n=>{
+        html += `<td style="vertical-align:middle; padding:3px 2px; height:1px;"><div style="display:flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap; height:100%; min-height:22px;">${cell.length? cell.map(n=>{
           const dateGroupOf = a4GroupOfFor(ds);
           const g = dateGroupOf[n] || groupOf[n] || 'A';
           let swap = swapMap[ds+'_'+shift+'_'+n];
@@ -10644,7 +10644,7 @@ async function downloadA4(){
             return `<span style="display:inline-block; text-align:center; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px; text-align:center;">${n}</span>`;
-        }).join(' '):'<span class="name-pill empty" style="font-size:11px;padding:3px 7px;">－</span>'}</td>`;
+        }).join(''):'<span class="name-pill empty" style="font-size:11px;padding:3px 7px;">－</span>'}</div></td>`;
       }
       html += `</tr>`;
     });
