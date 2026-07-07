@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v19</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v21</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6897,13 +6897,19 @@ function openSwapModal(date, shift, name){
       // populateComboBlock 是同步函式,可以直接設
       if(rec1 && partner){
         if($('comboPartner')) $('comboPartner').value = partner;
-        const partnerBtn = document.querySelector(`#comboPartnerPills [data-name="${partner}"]`);
-        if(partnerBtn) partnerBtn.classList.add('active');
-        else if($('comboPartnerPills')){
-          // partner 不在當前 employees 列表(可能已離職),仍顯示使用者選擇
-          $('comboPartnerPills').insertAdjacentHTML('beforeend',
-            `<button type="button" class="partner-pill active" data-name="${partner}" onclick="selectComboPartner('${partner}')">${partner} <span style="color:#a83838; font-size:12px;">(資料異常)</span></button>`);
+        let partnerBtn = document.querySelector(`#comboPartnerPills [data-name="${partner}"]`);
+        if(!partnerBtn){
+          // 舊名殘留 → 用名稱相似度對應現有名單 (例:程 ↔ 程秋蓉、瑞宇 ↔ 許瑞宇)
+          const pills = Array.from(document.querySelectorAll('#comboPartnerPills [data-name]'));
+          partnerBtn = pills.find(el => {
+            const nm = el.getAttribute('data-name') || '';
+            return nm && (nm.includes(partner) || partner.includes(nm));
+          }) || null;
+          if(partnerBtn && $('comboPartner')) $('comboPartner').value = partnerBtn.getAttribute('data-name');
         }
+        if(partnerBtn) partnerBtn.classList.add('active');
+        // 對應不到現有員工時:不再顯示誤導的「(資料異常)」殘留 pill,
+        // 改由使用者從上方有效名單自行選擇正確的人
       }
       if(rec2){
         if($('comboPartnerDate')) $('comboPartnerDate').value = rec2.date || '';
@@ -10556,7 +10562,7 @@ async function downloadA4(){
             return null;
           }).filter(n => n !== null);
         }
-        html += `<td style="text-align:center; padding:3px 2px;">${cell.length? cell.map(n=>{
+        html += `<td style="text-align:center; vertical-align:middle; padding:3px 2px;">${cell.length? cell.map(n=>{
           const dateGroupOf = a4GroupOfFor(ds);
           const g = dateGroupOf[n] || groupOf[n] || 'A';
           let swap = swapMap[ds+'_'+shift+'_'+n];
@@ -10635,9 +10641,9 @@ async function downloadA4(){
             // 備註已合併到 cover-branch 同行,此處不重複輸出
             // (僅兩段班需要在分段渲染後不再重複,但兩段班的 displayHtml 自己處理過了)
             const noteHtml = '';
-            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
+            return `<span style="display:inline-block; text-align:center; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
-          return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px;">${n}</span>`;
+          return `<span class="name-pill ${g}" style="font-family:'Noto Serif TC',serif; font-size:11px; padding:3px 7px; text-align:center;">${n}</span>`;
         }).join(' '):'<span class="name-pill empty" style="font-size:11px;padding:3px 7px;">－</span>'}</td>`;
       }
       html += `</tr>`;
@@ -10930,7 +10936,7 @@ async function downloadA4PartTime(){
             }
             // 備註已合併到 cover-branch 同行,此處不重複輸出
             const noteHtml = '';
-            return `<span style="display:inline-block; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
+            return `<span style="display:inline-block; text-align:center; background:${bg}; color:${fg}; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${displayHtml}${noteHtml}</span>`;
           }
           // 一般人員(工讀沒有 ABCD 分組,使用通用青綠色 pill)
           return `<span style="display:inline-block; background:#e7eff5; color:#345d7a; font-family:'Noto Serif TC',serif; font-size:11px; font-weight:600; padding:3px 7px; border-radius:5px; line-height:1.2;">${n}</span>`;
