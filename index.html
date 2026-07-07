@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v22</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v23</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -10562,7 +10562,7 @@ async function downloadA4(){
             return null;
           }).filter(n => n !== null);
         }
-        html += `<td style="vertical-align:middle; padding:3px 2px; height:1px;"><div style="display:flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap; height:100%; min-height:22px;">${cell.length? cell.map(n=>{
+        html += `<td style="vertical-align:middle; padding:3px 2px; height:1px;"><div style="display:flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap; min-height:34px;">${cell.length? cell.map(n=>{
           const dateGroupOf = a4GroupOfFor(ds);
           const g = dateGroupOf[n] || groupOf[n] || 'A';
           let swap = swapMap[ds+'_'+shift+'_'+n];
