@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v18</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v19</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -5971,10 +5971,12 @@ function renderScheduleTable(setting, period){
   let _hasMorn = false, _hasNoon = false, _hasEve = false, _hasAtt = false;
   _segs.forEach(seg => {
     const r = seg.rules || {};
-    if((r.morningCount || 0) > 0) _hasMorn = true;
-    if((r.noonCount || 0) > 0) _hasNoon = true;
-    if((r.eveningCount || 0) > 0) _hasEve = true;
-    if((r.attendanceCount || 0) > 0) _hasAtt = true;
+    // 依循環字串實際出現的班別決定 (早晚休 → 只有早/晚,不受人數欄殘留影響)
+    const pat = Array.isArray(r.cyclePattern) ? r.cyclePattern : [];
+    if(pat.includes('早'))  _hasMorn = true;
+    if(pat.includes('午'))  _hasNoon = true;
+    if(pat.includes('晚'))  _hasEve = true;
+    if(pat.includes('出勤')) _hasAtt = true;
   });
   const hasNoon = _hasNoon;
   const hasAttendance = _hasAtt;
@@ -6020,12 +6022,11 @@ function renderScheduleTable(setting, period){
     const _wKeys = new Set();
     for(let _d=0; _d<7; _d++){
       const _wr = getRulesForDate(setting, fmt(addDays(startD, w*7+_d)));
-      if(_wr){
-        if((_wr.morningCount||0)>0)    _wKeys.add('morning');
-        if((_wr.noonCount||0)>0)       _wKeys.add('noon');
-        if((_wr.eveningCount||0)>0)    _wKeys.add('evening');
-        if((_wr.attendanceCount||0)>0) _wKeys.add('attendance');
-      }
+      const _wpat = (_wr && Array.isArray(_wr.cyclePattern)) ? _wr.cyclePattern : [];
+      if(_wpat.includes('早'))  _wKeys.add('morning');
+      if(_wpat.includes('午'))  _wKeys.add('noon');
+      if(_wpat.includes('晚'))  _wKeys.add('evening');
+      if(_wpat.includes('出勤')) _wKeys.add('attendance');
     }
     let wRows = shiftRows.filter(sr => _wKeys.has(sr.key));
     if(!wRows.length) wRows = shiftRows;
@@ -6048,11 +6049,12 @@ function renderScheduleTable(setting, period){
         const ds = fmt(dt);
         // 該日該班別是否屬於當日生效規則 — 不屬於則顯示淡化「—」而非可點的「＋」
         const _dr = getRulesForDate(setting, ds);
+        const _dpat = (_dr && Array.isArray(_dr.cyclePattern)) ? _dr.cyclePattern : [];
         const _shiftOn =
-          (sr.key === 'morning'    && (_dr && (_dr.morningCount    || 0) > 0)) ||
-          (sr.key === 'noon'       && (_dr && (_dr.noonCount       || 0) > 0)) ||
-          (sr.key === 'evening'    && (_dr && (_dr.eveningCount    || 0) > 0)) ||
-          (sr.key === 'attendance' && (_dr && (_dr.attendanceCount || 0) > 0));
+          (sr.key === 'morning'    && _dpat.includes('早')) ||
+          (sr.key === 'noon'       && _dpat.includes('午')) ||
+          (sr.key === 'evening'    && _dpat.includes('晚')) ||
+          (sr.key === 'attendance' && _dpat.includes('出勤'));
         if(!_shiftOn){
           html += `<td class="shift-na"><span class="shift-na-mark">—</span></td>`;
           continue;
@@ -10458,12 +10460,11 @@ async function downloadA4(){
     const _wKeys = new Set();
     for(let _d=0; _d<7; _d++){
       const _wr = getRulesForDate(setting, fmt(addDays(startD, w*7+_d)));
-      if(_wr){
-        if((_wr.morningCount||0)>0)    _wKeys.add('早');
-        if((_wr.noonCount||0)>0)       _wKeys.add('午');
-        if((_wr.attendanceCount||0)>0) _wKeys.add('出勤');
-        if((_wr.eveningCount||0)>0)    _wKeys.add('晚');
-      }
+      const _wpat = (_wr && Array.isArray(_wr.cyclePattern)) ? _wr.cyclePattern : [];
+      if(_wpat.includes('早'))  _wKeys.add('早');
+      if(_wpat.includes('午'))  _wKeys.add('午');
+      if(_wpat.includes('出勤')) _wKeys.add('出勤');
+      if(_wpat.includes('晚'))  _wKeys.add('晚');
     }
     let wA4Shifts = a4Shifts.filter(x => _wKeys.has(x));
     if(!wA4Shifts.length) wA4Shifts = a4Shifts;
@@ -10477,12 +10478,13 @@ async function downloadA4(){
         const ds = fmt(addDays(startD,w*7+d));
         // 該日該班別不屬於當日生效規則 → 淡化「—」
         const _a4dr = getRulesForDate(setting, ds);
+        const _a4pat = (_a4dr && Array.isArray(_a4dr.cyclePattern)) ? _a4dr.cyclePattern : [];
         const _a4sk = shiftKey(shift);
         const _a4on =
-          (_a4sk === 'morning'    && (_a4dr && (_a4dr.morningCount    || 0) > 0)) ||
-          (_a4sk === 'noon'       && (_a4dr && (_a4dr.noonCount       || 0) > 0)) ||
-          (_a4sk === 'evening'    && (_a4dr && (_a4dr.eveningCount    || 0) > 0)) ||
-          (_a4sk === 'attendance' && (_a4dr && (_a4dr.attendanceCount || 0) > 0));
+          (_a4sk === 'morning'    && _a4pat.includes('早')) ||
+          (_a4sk === 'noon'       && _a4pat.includes('午')) ||
+          (_a4sk === 'evening'    && _a4pat.includes('晚')) ||
+          (_a4sk === 'attendance' && _a4pat.includes('出勤'));
         if(!_a4on){
           html += `<td style="text-align:center; color:#cfc6ad; font-size:11px; padding:4px 2px;">—</td>`;
           continue;
