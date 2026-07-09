@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v23</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v24</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6818,12 +6818,14 @@ function openSwapModal(date, shift, name){
   // 依當前院區+職位的設定動態填入 (count > 0 才顯示) — 與 combo 同邏輯
   const sptSel = $('swapPartnerShift');
   if(sptSel){
-    const rules = (setting && setting.rules) || {};
+    // 依「目前這格所屬規則段」的循環字串決定班別選項 (支援 8/1 起切換成早晚)
+    const _psRules = getRulesForDate(setting, (_swapCtx && _swapCtx.date)) || (setting && setting.rules) || {};
+    const _psPat = Array.isArray(_psRules.cyclePattern) ? _psRules.cyclePattern : [];
     const shiftOpts = [];
-    if((rules.morningCount||0) > 0)    shiftOpts.push({value:'早', label:'早　班'});
-    if((rules.noonCount||0) > 0)       shiftOpts.push({value:'午', label:'午　班'});
-    if((rules.eveningCount||0) > 0)    shiftOpts.push({value:'晚', label:'晚　班'});
-    if((rules.attendanceCount||0) > 0) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
+    if(_psPat.includes('早'))  shiftOpts.push({value:'早', label:'早　班'});
+    if(_psPat.includes('午'))  shiftOpts.push({value:'午', label:'午　班'});
+    if(_psPat.includes('晚'))  shiftOpts.push({value:'晚', label:'晚　班'});
+    if(_psPat.includes('出勤')) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
     if(shiftOpts.length === 0){
       shiftOpts.push(
         {value:'早', label:'早　班'},{value:'午', label:'午　班'},
@@ -7157,12 +7159,14 @@ function populateComboBlock(){
   //    一般早晚 → 顯示「早 + 晚」
   const shSel = $('comboPartnerShift');
   if(shSel){
-    const rules = (setting && setting.rules) || {};
+    // 依「目前這格所屬規則段」的循環字串決定班別選項 (支援 8/1 起切換成早晚)
+    const _psRules = getRulesForDate(setting, (_swapCtx && _swapCtx.date)) || (setting && setting.rules) || {};
+    const _psPat = Array.isArray(_psRules.cyclePattern) ? _psRules.cyclePattern : [];
     const shiftOpts = [];
-    if((rules.morningCount||0) > 0)    shiftOpts.push({value:'早', label:'早　班'});
-    if((rules.noonCount||0) > 0)       shiftOpts.push({value:'午', label:'午　班'});
-    if((rules.eveningCount||0) > 0)    shiftOpts.push({value:'晚', label:'晚　班'});
-    if((rules.attendanceCount||0) > 0) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
+    if(_psPat.includes('早'))  shiftOpts.push({value:'早', label:'早　班'});
+    if(_psPat.includes('午'))  shiftOpts.push({value:'午', label:'午　班'});
+    if(_psPat.includes('晚'))  shiftOpts.push({value:'晚', label:'晚　班'});
+    if(_psPat.includes('出勤')) shiftOpts.push({value:'出勤', label:'出勤(12HR)'});
     // Fallback:全部沒設(防禦) → 顯示全部 4 個
     if(shiftOpts.length === 0){
       shiftOpts.push(
