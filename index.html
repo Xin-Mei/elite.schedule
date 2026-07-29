@@ -2384,7 +2384,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v25</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v26</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -5043,7 +5043,7 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
   // 從 setting.rules.weekHours 讀取
   // 新格式:[{r1:string, r2:string}, ...] (7 筆) — 兩列獨立時段
   // 舊格式:[string, ...] — 兼容轉換為 {r1:string, r2:''}
-  let rawHours = setting.rules.weekHours || [];
+  let rawHours = (Array.isArray(monthSched.weekHours) && monthSched.weekHours.length) ? monthSched.weekHours : (setting.rules.weekHours || []);
   const weekHours = Array.from({length:7}, (_, i) => {
     const v = rawHours[i];
     if(typeof v === 'string') return {r1: v, r2: ''};
@@ -5182,33 +5182,48 @@ function renderPartTimeCalendar(setting, yr, mo, daysInMonth){
 // Edit one cell of the weekly hours table (per dow) — two rows
 async function editPtcHours(dow){
   if(!requireEditPermission()) return;
-  const setting = getCurrentSetting();
-  if(!setting.rules.weekHours) setting.rules.weekHours = [];
-  // Normalize: ensure all 7 entries are objects
+  // ── 診助上班時間改為「每月獨立」:存進該月份的排班資料,而非共用職位設定 ──
+  const [yr, mo] = State.partTimeMonth.split('-').map(Number);
+  const monthKey = `${State.currentBranch}__工讀__${yr}-${pad(mo)}-01`;
+  const monthSched = State.schedules[monthKey] || {shifts:{}};
+  monthSched.shifts = monthSched.shifts || {};
+  // 若本月尚未有自己的 weekHours,從舊的共用設定帶入一次當起始值 (之後獨立)
+  if(!Array.isArray(monthSched.weekHours) || !monthSched.weekHours.length){
+    const legacy = (getCurrentSetting().rules.weekHours || []);
+    monthSched.weekHours = Array.from({length:7}, (_, i) => {
+      const v = legacy[i];
+      if(typeof v === 'string') return {r1: v, r2: ''};
+      if(v && typeof v === 'object') return {r1: v.r1 || '', r2: v.r2 || ''};
+      return {r1:'', r2:''};
+    });
+  }
+  // Normalize
   for(let i=0;i<7;i++){
-    const v = setting.rules.weekHours[i];
-    if(typeof v === 'string') setting.rules.weekHours[i] = {r1:v, r2:''};
-    else if(!v || typeof v !== 'object') setting.rules.weekHours[i] = {r1:'',r2:''};
+    const v = monthSched.weekHours[i];
+    if(typeof v === 'string') monthSched.weekHours[i] = {r1:v, r2:''};
+    else if(!v || typeof v !== 'object') monthSched.weekHours[i] = {r1:'',r2:''};
   }
   const dayLabels = ['日','一','二','三','四','五','六'];
-  const cur = setting.rules.weekHours[dow];
+  const cur = monthSched.weekHours[dow];
   const r1 = prompt(`週${dayLabels[dow]} — 第 1 列時段:\n例如:9-12 或 09:00 ~ 12:00\n(留空 = 該列無值)`, cur.r1 || '');
   if(r1 === null) return; // cancelled
   const r2 = prompt(`週${dayLabels[dow]} — 第 2 列時段:\n例如:14-18 或 14:00 ~ 18:00\n(留空 = 該列無值)`, cur.r2 || '');
   if(r2 === null) return;
-  setting.rules.weekHours[dow] = {r1: r1.trim(), r2: r2.trim()};
+  monthSched.weekHours[dow] = {r1: r1.trim(), r2: r2.trim()};
+  State.schedules[monthKey] = monthSched;
 
   showLoading('儲存中…');
-  const res = await api('saveSettings', {
-    branch: State.currentBranch, position: '工讀', data: setting
+  const res = await api('saveSchedule', {
+    branch: State.currentBranch, position: '工讀',
+    periodStart: `${yr}-${pad(mo)}-01`, data: monthSched
   });
   hideLoading();
   if(!res.ok){
     toast('儲存失敗:'+(res.error||'未知錯誤'),'error');
     return;
   }
-  renderBranchMonthly(setting);
-  toast('✓ 已更新');
+  renderBranchMonthly(getCurrentSetting());
+  toast('✓ 已更新 (僅本月)');
 }
 
 // Click handler — prompt for name, save to schedule
@@ -10770,7 +10785,7 @@ async function downloadA4PartTime(){
   ];
 
   // 診助上班時間 (兩列時段,週日~週六)
-  const rawHours = setting.rules.weekHours || [];
+  const rawHours = (Array.isArray(monthSched.weekHours) && monthSched.weekHours.length) ? monthSched.weekHours : (setting.rules.weekHours || []);
   const weekHours = Array.from({length:7}, (_, i) => {
     const v = rawHours[i];
     if(typeof v === 'string') return {r1: v, r2: ''};
