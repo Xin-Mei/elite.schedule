@@ -2293,6 +2293,12 @@
   body[data-role="employee"] .admin-only,
   body[data-role="guest"] .admin-only{display:none !important;}
 
+  /* admin-strict:僅系統管理員可見 (中階主管也隱藏) */
+  body[data-role="staff"] .admin-strict,
+  body[data-role="employee"] .admin-strict,
+  body[data-role="guest"] .admin-strict,
+  body[data-role="manager"] .admin-strict{display:none !important;}
+
   /* 中階主管在無權限院區時顯示提示 banner */
   .manager-scope-banner{
     max-width:1400px; margin:-4px auto 14px;
@@ -2384,7 +2390,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v26</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v27</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -2596,7 +2602,7 @@
       <button class="btn admin-only" id="quickSwapBtn" onclick="toggleQuickSwap()">⇄ 快速換班</button>
       <button class="btn admin-only" onclick="openSettingsModal()">⚙ 院區設定</button>
       <button class="btn admin-only" onclick="autoGenerate()">⚡ 自動排班</button>
-      <button class="btn primary admin-only" onclick="downloadA4()">📥 下載圖片</button>
+      <button class="btn primary admin-strict" onclick="downloadA4()">📥 下載圖片</button>
     </div>
   </div>
   <!-- 中階主管權限提示 banner (僅 manager 在無權限院區時顯示) -->
