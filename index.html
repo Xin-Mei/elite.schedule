@@ -2416,7 +2416,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v29</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v30</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -4359,6 +4359,21 @@ function renderBranchGrid(){
   });
 }
 
+// ── 手機:把整頁縮放重置回「剛好塞滿螢幕寬」(如電腦版整頁視圖) ──
+// iOS 無法直接用 JS 還原縮放;重寫 viewport meta 的 initial/maximum-scale 可強制套用,
+// 之後立刻還原為自由縮放 (width=1280),使用者仍可雙指放大。桌面裝置不受影響。
+function resetMobileZoom(){
+  try {
+    if(!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches)) return;
+    const vp = document.querySelector('meta[name="viewport"]');
+    if(!vp) return;
+    const sw = Math.min(window.screen.width || 9999, window.screen.height || 9999);
+    const scale = Math.min(1, (sw || 390) / 1280);
+    vp.setAttribute('content', 'width=1280, initial-scale=' + scale + ', maximum-scale=' + scale);
+    setTimeout(function(){ vp.setAttribute('content', 'width=1280'); }, 250);
+  } catch(_){}
+}
+
 function openBranch(name){
   State.currentBranch = name;
   State.currentPosition = '櫃台';
@@ -4373,6 +4388,7 @@ function openBranch(name){
   // 捲動到頁面頂端,確保使用者看得到職位分類列
   // (院區清單若被捲到下方,點進來時不重置會停在原位置)
   window.scrollTo({ top: 0, behavior: 'auto' });
+  resetMobileZoom();
 }
 
 // 渲染麵包屑中的「院區名稱」— 管理員看到院區膠囊列(可一鍵切換),其他角色看純文字
@@ -4414,6 +4430,7 @@ function switchBranch(name){
   updateHash();
   // 切到新院區捲到頁面頂端 — 確保看得到職位分類
   window.scrollTo({ top: 0, behavior: 'auto' });
+  resetMobileZoom();
   toast('已切換至 ' + name + ' 院區');
 }
 
@@ -4422,6 +4439,8 @@ function backToHome(){
   $('homeView').style.display='';
   $('branchView').classList.remove('active');
   updateHash();
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  resetMobileZoom();
 }
 
 // ── URL hash routing — preserve view across page reloads ──
