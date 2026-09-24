@@ -2387,10 +2387,36 @@
     .form-grid{grid-template-columns:1fr;}
     .record-item{grid-template-columns:1fr 1fr; gap:8px;}
   }
+
+  /* ─── 觸控裝置 (手機/平板) 專用調整 ───────────────────────────
+     viewport 固定 1280 後,頁面在手機是整頁縮小顯示。
+     1) 輸入框 CSS 字級一律 ≥16px:iOS Safari 聚焦字級 <16px 的輸入框會自動放大頁面,
+        造成畫面跳動且鍵盤收起後停在放大狀態 → 全面關閉此行為。
+     2) 登入視窗整體放大:縮小後仍清楚可讀、可直接打字。 */
+  @media (hover: none) and (pointer: coarse){
+    input, select, textarea{ font-size:16px !important; }
+
+    #employeeLoginGate .modal,
+    #adminLoginModal .modal{ max-width:900px !important; width:92%; }
+    #employeeLoginGate .modal-head h3,
+    #adminLoginModal .modal-head h3{ font-size:42px; }
+    #employeeLoginGate .modal-head h3 span,
+    #adminLoginModal .modal-head h3 span{ font-size:42px !important; }
+    #employeeLoginGate .modal-body p,
+    #adminLoginModal .modal-body p{ font-size:26px !important; line-height:1.6; }
+    #employeeLoginGate .form-row label,
+    #adminLoginModal .form-row label{ font-size:28px; }
+    #employeeLoginGate input,
+    #adminLoginModal input{ font-size:36px !important; padding:18px 20px; }
+    #employeeLoginGate .login-error,
+    #adminLoginModal .login-error{ font-size:26px; }
+    #employeeLoginGate .modal-foot .btn,
+    #adminLoginModal .modal-foot .btn{ font-size:32px; padding:20px; }
+  }
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v28</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v29</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
