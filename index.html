@@ -2416,7 +2416,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v30</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v31</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -4325,6 +4325,8 @@ function goHome(opts){
     // 不清 view state — 直接清 hash 但保留 localStorage
     history.replaceState(null, '', location.pathname + location.search);
   }
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  resetMobileZoom();
 }
 
 function switchHomeTab(name){
@@ -11390,6 +11392,9 @@ async function doEmployeeLogin(){
 function closeEmployeeGate(){
   const gate = $('employeeLoginGate');
   if(gate) gate.classList.remove('show');
+  // 登入完成後:等鍵盤收合再把畫面重置回「整頁縮放剛好」
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  setTimeout(function(){ resetMobileZoom(); }, 400);
 }
 
 function openEmployeeGate(){
