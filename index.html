@@ -2416,7 +2416,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v31</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v32</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6830,8 +6830,9 @@ function openSwapModal(date, shift, name){
     s.originalName === name
   );
 
-  // 訪客若點到管理員設定的假別格子 → 不開啟視窗 (隱私保護)
-  if(existing && existing.mode === 'leave' && State.user.role !== 'admin'){
+  // 員工/訪客點到已設定的假別/缺人格子 → 不開啟視窗 (隱私保護)
+  // 管理員與「可編輯該院區的主管」皆可開啟並操作 (含缺人)
+  if(existing && existing.mode === 'leave' && !(typeof canEditCurrentBranch === 'function' && canEditCurrentBranch())){
     toast('此班別已由管理員處理','warn');
     return;
   }
