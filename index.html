@@ -2416,7 +2416,7 @@
 </style>
 </head>
 <body>
-<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v32</div>
+<div id="appVer" style="position:fixed; bottom:4px; right:6px; font-size:10px; color:#c9c2ad; z-index:99999; pointer-events:none; letter-spacing:1px;">v33</div>
 
 <!-- ========== Login Gate (unified entry — admin or employee) ========== -->
 <div class="modal-back show" id="employeeLoginGate" style="z-index:300;">
@@ -6295,8 +6295,10 @@ function renderCell(names, dateStr, shift, groupOf, swapMap){
       const noteHtml = '';
       // (不再以 swap.reason 作為 fallback 顯示假別文字 — 排班表上一律不顯示假別)
       // Tooltip 也保護隱私 — 只有管理員看得到完整原因
+      // 操作者顯示在最前面 (紀錄的 operator 欄;未儲存的紀錄 = 當前使用者操作)
+      const _opName = swap.operator || (swap._unsaved ? getOperatorLabel() : '');
       const tip = isAdmin
-        ? `${swap.reason} · 原 ${n}` + (noteText ? ` · ${noteText}` : '')
+        ? `${_opName ? _opName + ' ' : ''}${swap.reason} · 原 ${n}` + (noteText ? ` · ${noteText}` : '')
         : `代班 · 原 ${n}`;
       // data-display-name = 畫面上實際顯示的人(供快速換班用),
       // onclick 仍傳原 n 以維持既有 swap/edit 流程
